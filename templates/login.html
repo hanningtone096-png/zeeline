@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>Login — ZEE LINE RISK SOLUTIONS</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'inter', -apple-system , BlinkMacSystemFont , 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif, sans-serif;
+    background: linear-gradient(135deg, #f3f2f9 0%, #ffffff 50%, #f3f3f6 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.login-wrap {
+    width: 100%;
+    max-width: 400px;
+}
+
+.brand {
+    text-align: center;
+    margin-bottom: 28px;
+}
+
+.brand-logo {
+    width: 56px; height: 56px;
+    background: #fff;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    box-shadow: 0 8px 20px rgba(37,99,235,.4);
+    object-fit: contain;
+    padding: 6px;
+}
+
+.brand h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #2e6fe9;
+    letter-spacing: .02em;
+}
+
+.brand p {
+    font-size: 13px;
+    color: #93c5fd;
+    margin-top: 4px;
+}
+
+.card {
+    background: #ef4102;
+    border: 1px solid #37acf5;
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.4);
+}
+
+.card h2 {
+    font-size: 18px;
+    color: #f1f5f9;
+    margin-bottom: 22px;
+    font-weight: 600;
+}
+
+.form-group {
+    margin-bottom: 16px;
+    position: relative;
+}
+
+.form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 6px;
+}
+
+.input-wrap {
+    position: relative;
+}
+
+.input-wrap i {
+    position: absolute;
+    left: 13px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #475569;
+    font-size: 14px;
+}
+
+.input-wrap input {
+    width: 100%;
+    padding: 11px 13px 11px 38px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    color: #f1f5f9;
+    font-size: 14px;
+    transition: .2s;
+    outline: none;
+}
+
+.input-wrap input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37,99,235,.2);
+}
+
+.input-wrap input::placeholder { color: #475569; }
+
+.toggle-pw {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #475569;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+}
+
+.submit-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 6px;
+    transition: .2s;
+    box-shadow: 0 4px 12px rgba(37,99,235,.3);
+}
+
+.submit-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #e8cd1c, #2a0513);
+    box-shadow: 0 6px 16px rgba(13, 61, 3, 0);
+}
+
+.submit-btn:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+}
+
+.msg {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+    text-align: center;
+}
+
+.msg.error   { background: rgba(239,68,68,.15); color: #f87171; border: 1px solid rgba(239,68,68,.3); display: block; }
+.msg.success { background: rgba(34,197,94,.15);  color: #4ade80; border: 1px solid rgba(34,197,94,.3);  display: block; }
+
+.toggle-link {
+    text-align: center;
+    margin-top: 18px;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.toggle-link a {
+    color: #93c5fd;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.toggle-link a:hover { color: #bfdbfe; }
+
+.divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 18px 0;
+    color: #334155;
+    font-size: 12px;
+}
+
+.divider::before, .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #334155;
+}
+</style>
+</head>
+<body>
+
+<div class="login-wrap">
+
+    <!-- Brand -->
+    <div class="brand">
+        <img class="brand-logo" src="/css/images/westlake_logo.png" alt="Westlake Insurance">
+        <h1>ZEE LINE RISK TECHNOLOGIES</h1>
+        <p>Agent Management Portal</p>
+    </div>
+
+    <div class="card">
+
+        <h2 id="formTitle">Sign In</h2>
+
+        <!-- LOGIN -->
+        <div id="loginForm">
+            <div class="form-group">
+                <label>Username</label>
+                <div class="input-wrap">
+                    <i class="fas fa-user"></i>
+                    <input type="text" id="username" placeholder="Enter your username" autocomplete="username">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <div class="input-wrap">
+                    <i class="fas fa-lock"></i>
+                    <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password"
+                           onkeydown="if(event.key==='Enter') login()">
+                    <button class="toggle-pw" type="button" onclick="togglePw('password',this)">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
+            </div>
+            <button class="submit-btn" id="loginBtn" onclick="login()">
+                Sign In <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+
+        <!-- REGISTER -->
+        <div id="registerForm" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div class="form-group">
+                    <label>Full Name *</label>
+                    <div class="input-wrap"><i class="fas fa-id-card"></i>
+                        <input type="text" id="r_full_name" placeholder="Full Name">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Username *</label>
+                    <div class="input-wrap"><i class="fas fa-user"></i>
+                        <input type="text" id="r_username" placeholder="Username">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Phone *</label>
+                    <div class="input-wrap"><i class="fas fa-phone"></i>
+                        <input type="text" id="r_phone" placeholder="07XXXXXXXX">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Email *</label>
+                    <div class="input-wrap"><i class="fas fa-envelope"></i>
+                        <input type="email" id="r_email" placeholder="email@example.com">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>National ID *</label>
+                    <div class="input-wrap"><i class="fas fa-id-card"></i>
+                        <input type="text" id="r_id_number" placeholder="ID Number">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>KRA PIN *</label>
+                    <div class="input-wrap"><i class="fas fa-file-invoice"></i>
+                        <input type="text" id="r_kra_pin" placeholder="A000000000X" style="text-transform:uppercase;">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Gender *</label>
+                    <div class="input-wrap"><i class="fas fa-venus-mars"></i>
+                        <select id="r_gender" style="padding:11px 13px 11px 38px;width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;">
+                            <option value="">Select</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>IRA Number</label>
+                    <div class="input-wrap"><i class="fas fa-certificate"></i>
+                        <input type="text" id="r_ira_number" placeholder="IRA No (optional)">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>City</label>
+                    <div class="input-wrap"><i class="fas fa-city"></i>
+                        <input type="text" id="r_city" placeholder="e.g. Nairobi">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>County</label>
+                    <div class="input-wrap"><i class="fas fa-map-marker-alt"></i>
+                        <input type="text" id="r_county" placeholder="e.g. Nairobi">
+                    </div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Commission Payout Period *</label>
+                <div class="input-wrap"><i class="fas fa-calendar-check"></i>
+                    <select id="r_commission_payout" style="padding:11px 13px 11px 38px;width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#f1f5f9;font-size:14px;outline:none;">
+                        <option value="" disabled selected>Select payout schedule</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Password *</label>
+                <div class="input-wrap"><i class="fas fa-lock"></i>
+                    <input type="password" id="r_password" placeholder="Choose a strong password"
+                           onkeydown="if(event.key==='Enter') register()">
+                    <button class="toggle-pw" type="button" onclick="togglePw('r_password',this)">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Confirm Password *</label>
+                <div class="input-wrap"><i class="fas fa-lock"></i>
+                    <input type="password" id="r_confirm_password" placeholder="Re-enter your password"
+                           onkeydown="if(event.key==='Enter') register()">
+                    <button class="toggle-pw" type="button" onclick="togglePw('r_confirm_password',this)">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
+            </div>
+            <button class="submit-btn" id="regBtn" onclick="register()">
+                Create Account <i class="fas fa-user-plus"></i>
+            </button>
+        </div>
+
+        <div id="msg" class="msg"></div>
+
+        <div class="divider">or</div>
+
+        <div class="toggle-link">
+            <span id="toggleText">Don't have an account?</span>
+            <a onclick="toggleForm()"> <span id="toggleAction">Register here</span></a>
+        </div>
+<div id="otpForm" style="display:none;">
+            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 16px; text-align: center;">
+                We sent a 6-digit verification code to your email. Enter it below to complete your registration.
+            </p>
+            <div class="form-group">
+                <label>Verification Code</label>
+                <div class="input-wrap">
+                    <i class="fas fa-key"></i>
+                    <input type="text" id="v_code" placeholder="Enter 6-digit code" maxlength="6" style="letter-spacing: 4px; font-weight: bold; text-align: center; padding-left: 14px;">
+                </div>
+            </div>
+            <input type="hidden" id="v_user_id">
+            <button class="submit-btn" id="otpBtn" onclick="verifyOtp()">
+                Verify Code <i class="fas fa-check"></i>
+            </button>
+        </div>
+    </div>
+</div>
+<script>
+let currentView = 'login'; // Modes: 'login', 'register', or 'otp'
+
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+function withCsrf(headers = {}) {
+    return { ...headers, 'X-CSRFToken': CSRF_TOKEN };
+}
+
+function toggleForm() {
+    if (currentView === 'login') {
+        currentView = 'register';
+    } else {
+        currentView = 'login';
+    }
+    updateUI();
+    clearMsg();
+}
+
+function updateUI() {
+    // Show/hide wrappers based on current UI state
+    document.getElementById('loginForm').style.display    = currentView === 'login'    ? 'block' : 'none';
+    document.getElementById('registerForm').style.display = currentView === 'register' ? 'block' : 'none';
+    document.getElementById('otpForm').style.display      = currentView === 'otp'      ? 'block' : 'none';
+
+    const titleEl = document.getElementById('formTitle');
+    const textEl  = document.getElementById('toggleText');
+    const actEl   = document.getElementById('toggleAction');
+
+    if (currentView === 'login') {
+        titleEl.innerText = 'Sign In';
+        textEl.innerText = "Don't have an account?";
+        actEl.innerText = 'Register here';
+    } else if (currentView === 'register') {
+        titleEl.innerText = 'Create Account';
+        textEl.innerText = 'Already have an account?';
+        actEl.innerText = 'Sign in';
+    } else if (currentView === 'otp') {
+        titleEl.innerText = 'Verify Email';
+        textEl.innerText = 'Need a new code?';
+        actEl.innerText = 'Restart Registration';
+    }
+}
+
+function showMsg(type, text) {
+    const el = document.getElementById('msg');
+    el.className = `msg ${type}`;
+    el.innerText = text;
+}
+
+function clearMsg() {
+    const el = document.getElementById('msg');
+    el.className = 'msg';
+    el.innerText = '';
+}
+
+function togglePw(inputId, btn) {
+    const input = document.getElementById(inputId);
+    const isText = input.type === 'text';
+    input.type = isText ? 'password' : 'text';
+    btn.innerHTML = isText ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+}
+
+async function login() {
+    clearMsg();
+    const btn      = document.getElementById('loginBtn');
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+
+    if (!username || !password) { showMsg('error', 'Please enter your username and password.'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing in…';
+
+    try {
+        const res  = await fetch('/api/login', {
+            method:  'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body:    JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            if (data.redirect) { window.location.href = data.redirect; return; }
+            showMsg('error', data.error || 'Login failed. Please try again.');
+            return;
+        }
+
+        showMsg('success', 'Login successful — redirecting…');
+        setTimeout(() => { window.location.href = data.redirect || '/dashboard'; }, 700);
+
+    } catch {
+        showMsg('error', 'NO ACCOUNT FOUND-PLEASE SIGN UP.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Sign In <i class="fas fa-arrow-right"></i>';
+    }
+}
+
+async function register() {
+    clearMsg();
+    const btn = document.getElementById('regBtn');
+
+    const payload = {
+        full_name:         document.getElementById('r_full_name').value.trim(),
+        username:          document.getElementById('r_username').value.trim(),
+        email:             document.getElementById('r_email').value.trim(),
+        phone:             document.getElementById('r_phone').value.trim(),
+        id_number:         document.getElementById('r_id_number').value.trim(),
+        kra_pin:           document.getElementById('r_kra_pin').value.trim().toUpperCase(),
+        gender:            document.getElementById('r_gender').value,
+        ira_number:        document.getElementById('r_ira_number').value.trim(),
+        city:              document.getElementById('r_city').value.trim(),
+        county:            document.getElementById('r_county').value.trim(),
+        commission_payout: document.getElementById('r_commission_payout').value,
+        password:          document.getElementById('r_password').value,
+    };
+    const confirmPassword = document.getElementById('r_confirm_password').value;
+
+    if (!payload.full_name || !payload.username || !payload.email || !payload.phone || !payload.id_number ||
+        !payload.kra_pin || !payload.gender || !payload.commission_payout || !payload.password) {
+        showMsg('error', 'Please fill all required fields.');
+        return;
+    }
+
+    if (payload.password !== confirmPassword) {
+        showMsg('error', 'Passwords do not match.');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating account…';
+
+    try {
+        const res  = await fetch('/api/register', {
+            method:  'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body:    JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (!res.ok) { showMsg('error', data.error || 'Registration failed.'); return; }
+
+        showMsg('success', 'Account created! Please verify your email code.');
+        
+        // Save the dynamic user ID returned from your register endpoint
+        document.getElementById('v_user_id').value = data.user_id;
+
+        // Clear out registration input boxes
+        ['r_full_name','r_username','r_email','r_phone','r_id_number','r_kra_pin','r_ira_number',
+         'r_city','r_county','r_password','r_confirm_password'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('r_commission_payout').selectedIndex = 0;
+
+        // Move to OTP screen
+        setTimeout(() => { 
+            currentView = 'otp';
+            updateUI(); 
+            clearMsg(); 
+        }, 1500);
+
+    } catch {
+        showMsg('error', 'NO ACCOUNT FOUND-PLEASE SIGN UP.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Create Account <i class="fas fa-user-plus"></i>';
+    }
+}
+
+async function verifyOtp() {
+    clearMsg();
+    const btn = document.getElementById('otpBtn');
+    const code = document.getElementById('v_code').value.trim();
+    const user_id = document.getElementById('v_user_id').value;
+
+    if (!code) { showMsg('error', 'Please enter your verification code.'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying…';
+
+    try {
+        const res = await fetch('/api/verify-email', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ user_id, code })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            showMsg('error', data.error || 'Verification failed.');
+            return;
+        }
+
+        showMsg('success', 'Email verified successfully! Awaiting final admin approval before login.');
+        document.getElementById('v_code').value = '';
+        
+        setTimeout(() => {
+            currentView = 'login';
+            updateUI();
+            clearMsg();
+        }, 3500);
+
+    } catch {
+        showMsg('error', 'UNDER MAINTENANCE-THANKYOU FOR YOUR PATIENCE.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Verify Code <i class="fas fa-check"></i>';
+    }
+}
+</script>
+</body>
+</html>

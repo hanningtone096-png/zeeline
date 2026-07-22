@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WESTLAKE INSURANCE - Policy Renewals</title>
+<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+/* Pipeline */
+.renewals-pipeline { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; align-items:start; }
+@media(max-width:960px){ .renewals-pipeline { grid-template-columns:1fr; } }
+
+.pipeline-column { border-radius:12px; padding:16px; }
+.status-critical { background:#fef2f2; border:1px solid #fecaca; }
+.status-warning  { background:#fffbeb; border:1px solid #fde68a; }
+.status-info     { background:#eff6ff; border:1px solid #bfdbfe; }
+
+.column-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.column-header h3 { margin:0; font-size:14px; font-weight:600; }
+.status-critical .column-header h3 { color:#991b1b; }
+.status-warning  .column-header h3 { color:#92400e; }
+.status-info     .column-header h3 { color:#1e40af; }
+
+.count-badge {
+    width:24px; height:24px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; color:#fff;
+}
+.status-critical .count-badge { background:#ef4444; }
+.status-warning  .count-badge { background:#f59e0b; }
+.status-info     .count-badge { background:#3b82f6; }
+
+.renewal-card {
+    background:#fff; border-radius:10px; padding:14px; margin-bottom:10px;
+    box-shadow:0 1px 4px rgba(0,0,0,.06); border:1px solid #f1f5f9;
+    transition:.15s;
+}
+.renewal-card:hover { box-shadow:0 4px 12px rgba(0,0,0,.1); transform:translateY(-1px); }
+
+.card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px; gap:8px; }
+.card-top strong { font-size:14px; color:#1e293b; }
+
+.days-indicator { font-size:11px; font-weight:700; padding:3px 8px; border-radius:99px; white-space:nowrap; }
+.text-red    { background:#fee2e2; color:#991b1b; }
+.text-amber  { background:#fef9c3; color:#854d0e; }
+.text-blue   { background:#dbeafe; color:#1e40af; }
+.text-green  { background:#dcfce7; color:#166534; }
+
+.car-meta { font-size:12px; color:#64748b; margin:4px 0 8px; }
+.card-footer { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:#475569; }
+
+.action-btn-mini {
+    border:none; border-radius:6px; padding:6px 10px;
+    font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px;
+    transition:.15s;
+}
+.notify   { background:#dcfce7; color:#15803d; }
+.notify:hover  { background:#bbf7d0; }
+.renew-now { background:#eff6ff; color:#1d4ed8; }
+.renew-now:hover { background:#dbeafe; }
+
+/* Summary bar */
+.summary-bar { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+.summary-pill { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 16px; font-size:13px; }
+.summary-pill strong { display:block; font-size:20px; color:#1e293b; }
+.summary-pill span   { color:#64748b; }
+
+/* Filter */
+.filter-row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; align-items:center; }
+.filter-btn { padding:6px 14px; border:1px solid #e2e8f0; border-radius:99px; font-size:13px; cursor:pointer; background:#fff; color:#475569; }
+.filter-btn.active, .filter-btn:hover { background:#2563eb; color:#fff; border-color:#2563eb; }
+</style>
+</head>
+<body>
+
+<!-- ── Mobile top bar ── -->
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="openSidebar()">
+        <i class="fas fa-bars"></i>
+    </button>
+    <span class="brand">WESTLAKE</span>
+    <button class="logout-btn" onclick="logout()" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
+        <i class="fas fa-sign-out-alt"></i>
+    </button>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<div class="app-container">
+
+<nav class="sidebar">
+    <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()"><i class="fas fa-times"></i></button></div>
+    <ul class="nav-links">
+        <li><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
+        <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
+        <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
+        <li class="active"><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+    </ul>
+</nav>
+
+<main class="main-content">
+<header class="top-header">
+    <h1>Policy Renewals Tracking</h1>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+</header>
+
+<!-- Summary pills -->
+<div class="summary-bar" id="summaryBar"></div>
+
+<!-- Filters -->
+<div class="filter-row">
+    <span style="font-size:13px; font-weight:600; color:#475569;">Show:</span>
+    <button class="filter-btn active" onclick="setView(this,'pipeline')"><i class="fas fa-columns"></i> Pipeline</button>
+    <button class="filter-btn"       onclick="setView(this,'table')"><i class="fas fa-list"></i> Table</button>
+</div>
+
+<div id="page_error" style="display:none; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; border-radius:8px; padding:12px 16px; margin-bottom:20px; font-size:14px;"></div>
+
+<!-- Pipeline view -->
+<div class="renewals-pipeline" id="pipelineView">
+    <p style="color:#94a3b8; font-size:14px; grid-column:1/-1;">Loading renewals…</p>
+</div>
+
+<!-- Table view -->
+<div id="tableView" style="display:none;">
+    <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:14px;" id="renewalTable">
+            <thead>
+                <tr>
+                    <th style="padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0;">Client</th>
+                    <th style="padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0;">Vehicle</th>
+                    <th style="padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0;">Cover</th>
+                    <th style="padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0;">Expiry</th>
+                    <th style="padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0;">Status</th>
+                    <th style="padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0;">Premium</th>
+                    <th style="padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="renewalTableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+</main>
+</div>
+
+<script>
+let allRenewals = [];
+let currentView = 'pipeline';
+
+function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    d.setHours(0,0,0,0);
+    const now = new Date();
+    now.setHours(0,0,0,0);
+    return Math.ceil((d - now) / 86400000);
+}
+
+function bucketRenewals(renewals) {
+    const lapsed    = [];
+    const sevenDay  = [];
+    const thirtyDay = [];
+    renewals.forEach(r => {
+        const days = daysUntil(r.expiry_date);
+        if (days === null) return;
+        r.days = days;
+        if (days < 0)        lapsed.push(r);
+        else if (days <= 7)  sevenDay.push(r);
+        else if (days <= 30) thirtyDay.push(r);
+    });
+    return { lapsed, sevenDay, thirtyDay };
+}
+
+function dayLabel(days) {
+    const abs = Math.abs(days);
+    if (days < 0)     return { text:`Lapsed ${abs}d`,    cls:'text-red'   };
+    if (days === 0)   return { text:'Expires Today',      cls:'text-red'   };
+    if (days <= 7)    return { text:`${days} Days Left`,  cls:'text-amber' };
+    if (days <= 30)   return { text:`${days} Days Left`,  cls:'text-blue'  };
+    return                   { text:`${days} Days Left`,  cls:'text-green' };
+}
+
+function buildCard(r) {
+    const { text, cls } = dayLabel(r.days);
+    const isLapsed = r.days < 0;
+    const premium  = r.premium ? 'KES ' + Number(r.premium).toLocaleString() : '—';
+    const ph       = esc(r.phone || '');
+
+    const actionBtn = isLapsed
+        ? `<button class="action-btn-mini notify"
+                onclick="notifyClient('${ph}','${esc(r.client_name||'')}','${esc(r.vehicle_reg||'')}')">
+                <i class="fab fa-whatsapp"></i> Remind
+           </button>`
+        : `<button class="action-btn-mini renew-now"
+                onclick="renewPolicy('${esc(r.id||'')}','${esc(r.client_name||'')}')">
+                <i class="fas fa-sync-alt"></i> Renew
+           </button>`;
+
+    return `
+    <div class="renewal-card" id="card_${esc(r.id||'')}">
+        <div class="card-top">
+            <strong>${esc(r.client_name||'Unknown')}</strong>
+            <span class="days-indicator ${cls}">${text}</span>
+        </div>
+        <div class="car-meta">
+            ${esc(r.vehicle_make||'')}
+            ${r.vehicle_make && r.vehicle_reg ? ' • ' : ''}
+            <strong>${esc(r.vehicle_reg||'')}</strong>
+        </div>
+        <div class="card-footer">
+            <span>${premium}</span>
+            ${actionBtn}
+        </div>
+        ${r.agent_name ? `<p style="font-size:11px;color:#94a3b8;margin:6px 0 0;">Agent: ${esc(r.agent_name)}</p>` : ''}
+    </div>`;
+}
+
+function renderPipeline(renewals) {
+    const { lapsed, sevenDay, thirtyDay } = bucketRenewals(renewals);
+    const pv = document.getElementById('pipelineView');
+
+    renderSummary(lapsed, sevenDay, thirtyDay);
+
+    pv.innerHTML = `
+        <div class="pipeline-column status-critical">
+            <div class="column-header">
+                <h3><i class="fas fa-exclamation-triangle"></i> Completely Lapsed</h3>
+                <span class="count-badge">${lapsed.length}</span>
+            </div>
+            <div class="card-stack">
+                ${lapsed.length ? lapsed.map(buildCard).join('') : '<p style="color:#94a3b8;font-size:13px;">No lapsed policies.</p>'}
+            </div>
+        </div>
+
+        <div class="pipeline-column status-warning">
+            <div class="column-header">
+                <h3><i class="fas fa-clock"></i> Expiring in 7 Days</h3>
+                <span class="count-badge">${sevenDay.length}</span>
+            </div>
+            <div class="card-stack">
+                ${sevenDay.length ? sevenDay.map(buildCard).join('') : '<p style="color:#94a3b8;font-size:13px;">None expiring soon.</p>'}
+            </div>
+        </div>
+
+        <div class="pipeline-column status-info">
+            <div class="column-header">
+                <h3><i class="fas fa-calendar-alt"></i> Expiring in 30 Days</h3>
+                <span class="count-badge">${thirtyDay.length}</span>
+            </div>
+            <div class="card-stack">
+                ${thirtyDay.length ? thirtyDay.map(buildCard).join('') : '<p style="color:#94a3b8;font-size:13px;">No upcoming renewals.</p>'}
+            </div>
+        </div>
+    `;
+}
+
+function renderTable(renewals) {
+    const tbody = document.getElementById('renewalTableBody');
+    if (renewals.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px;">No renewals found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = renewals.map(r => {
+        const days = r.days !== undefined ? r.days : daysUntil(r.expiry_date);
+        const { text, cls } = dayLabel(days);
+        const isLapsed = days < 0;
+        return `
+        <tr style="border-bottom:1px solid #f1f5f9;">
+            <td style="padding:10px 12px;">${esc(r.client_name||'—')}<br><span style="font-size:12px;color:#64748b;">${esc(r.phone||'')}</span></td>
+            <td style="padding:10px 12px;"><strong>${esc(r.vehicle_reg||'—')}</strong><br><span style="font-size:12px;color:#64748b;">${esc(r.vehicle_make||'')}</span></td>
+            <td style="padding:10px 12px;">${esc((r.type_of_cover||'').replace(/_/g,' '))}</td>
+            <td style="padding:10px 12px;">${r.expiry_date ? new Date(r.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+            <td style="padding:10px 12px;"><span class="days-indicator ${cls}">${text}</span></td>
+            <td style="padding:10px 12px;">KES ${Number(r.premium||0).toLocaleString()}</td>
+            <td style="padding:10px 12px;">
+                ${isLapsed
+                    ? `<button class="action-btn-mini notify" onclick="notifyClient('${esc(r.phone||'')}','${esc(r.client_name||'')}','${esc(r.vehicle_reg||'')}')"><i class="fab fa-whatsapp"></i> Remind</button>`
+                    : `<button class="action-btn-mini renew-now" onclick="renewPolicy('${esc(r.id||'')}','${esc(r.client_name||'')}')"><i class="fas fa-sync-alt"></i> Renew</button>`
+                }
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function renderSummary(lapsed, sevenDay, thirtyDay) {
+    document.getElementById('summaryBar').innerHTML = `
+        <div class="summary-pill">
+            <strong style="color:#dc2626;">${lapsed.length}</strong>
+            <span>Lapsed</span>
+        </div>
+        <div class="summary-pill">
+            <strong style="color:#d97706;">${sevenDay.length}</strong>
+            <span>Expiring in 7 days</span>
+        </div>
+        <div class="summary-pill">
+            <strong style="color:#2563eb;">${thirtyDay.length}</strong>
+            <span>Expiring in 30 days</span>
+        </div>
+        <div class="summary-pill">
+            <strong>${allRenewals.length}</strong>
+            <span>Total tracked</span>
+        </div>
+    `;
+}
+
+function setView(btn, view) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentView = view;
+    document.getElementById('pipelineView').style.display = view === 'pipeline' ? 'grid' : 'none';
+    document.getElementById('tableView').style.display    = view === 'table'    ? 'block' : 'none';
+    if (view === 'table') {
+        const bucketed = bucketRenewals([...allRenewals]);
+        renderTable([...bucketed.lapsed, ...bucketed.sevenDay, ...bucketed.thirtyDay]);
+    }
+}
+
+function notifyClient(phone, name, reg) {
+    if (!phone) { alert('No phone number on record for this client.'); return; }
+    const msg  = encodeURIComponent(
+        `Dear ${name}, your vehicle insurance policy for ${reg} has lapsed or is expiring soon. ` +
+        `Please renew immediately to stay covered. Contact Westlake Insurance for assistance.`
+    );
+    const clean = phone.replace(/\D/g,'');
+    const intl  = clean.startsWith('0') ? '254'+clean.slice(1) : clean;
+    window.open(`https://wa.me/${intl}?text=${msg}`, '_blank');
+}
+
+async function renewPolicy(id, name) {
+    if (!confirm(`Initiate renewal for ${name}?`)) return;
+
+    try {
+        const res = await fetch('/api/renewals/renew', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ id })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            alert(`Policy renewed for ${name}.\nNew expiry: ${data.new_expiry}`);
+            loadRenewals();
+        } else {
+            alert(data.error || `Could not renew policy for ${name}. Please follow up manually.`);
+        }
+    } catch {
+        alert(`Network error. Please follow up manually for ${name}.`);
+    }
+}
+
+async function loadRenewals() {
+    try {
+        const res  = await fetch('/api/renewals/list');
+        const data = await res.json();
+
+        if (!res.ok) {
+            document.getElementById('page_error').style.display = 'block';
+            document.getElementById('page_error').innerText = data.error || 'Could not load renewals.';
+            return;
+        }
+
+        allRenewals = data.renewals || [];
+        renderPipeline(allRenewals);
+
+    } catch {
+        // Fallback to demo data so the page isn't blank during development
+        allRenewals = DEMO_DATA;
+        renderPipeline(allRenewals);
+    }
+}
+
+const DEMO_DATA = [
+    { id:'R001', client_name:'Otieno James',   vehicle_make:'Toyota Hilux',     vehicle_reg:'KDA 432B', phone:'0712345678', premium:45000, expiry_date: offsetDate(-4)  },
+    { id:'R002', client_name:'Amina Yusuf',    vehicle_make:'Mazda CX-5',       vehicle_reg:'KCV 987Z', phone:'0723456789', premium:38200, expiry_date: offsetDate(-12) },
+    { id:'R003', client_name:'Kamau Njuguna',  vehicle_make:'Subaru Forester',  vehicle_reg:'KCX 112M', phone:'0734567890', premium:51000, expiry_date: offsetDate(3)   },
+    { id:'R004', client_name:'Grace Mutua',    vehicle_make:'Honda Fit',        vehicle_reg:'KDB 554X', phone:'0745678901', premium:18500, expiry_date: offsetDate(18)  },
+    { id:'R005', client_name:'David Ochieng',  vehicle_make:'Isuzu FRR Truck',  vehicle_reg:'KDC 009P', phone:'0756789012', premium:120000, expiry_date: offsetDate(25) },
+];
+
+function offsetDate(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+}
+
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function logout() { await fetch('/api/logout'); window.location.href = '/login'; }
+
+loadRenewals();
+</script>
+<script>
+// ── Mobile Sidebar ───────────────────────────────────────────
+function openSidebar() {
+    document.querySelector('.sidebar').classList.add('open');
+    document.getElementById('sidebarOverlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        a.addEventListener('click', closeSidebar);
+    });
+});
+</script>
+</body>
+</html>

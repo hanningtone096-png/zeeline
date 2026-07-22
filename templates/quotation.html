@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>WESTLAKE INSURANCE - Quotation Wizard</title>
+<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+.step { display:none; }
+.step.active { display:block; }
+
+.form-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:28px; }
+.form-card h2 { margin:0 0 20px; font-size:18px; color:#1e293b; }
+
+.insurer-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:15px; margin-bottom:20px; }
+.insurer-card { border:2px solid #e2e8f0; padding:15px; border-radius:10px; cursor:pointer; transition:.2s; background:#fff; text-align:center; }
+.insurer-card:hover { border-color:#93c5fd; transform:translateY(-2px); }
+.insurer-card.selected { border-color:#2563eb; background:#eff6ff; }
+.insurer-card.disabled { opacity:.55; cursor:not-allowed; background:#f8fafc; }
+.insurer-card.disabled:hover { transform:none; border-color:#e2e8f0; }
+.coming-soon-tag { margin:0; font-size:11px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:.04em; }
+.insurer-card h3 { margin:8px 0 4px; font-size:15px; }
+.insurer-card p  { margin:0; font-size:12px; color:#64748b; }
+.insurer-logo { width:44px; height:44px; background:#2563eb; color:#fff; display:flex; align-items:center; justify-content:center; border-radius:50%; font-weight:bold; font-size:14px; margin:0 auto 8px; }
+.insurer-logo-img { width:56px; height:56px; object-fit:contain; margin:0 auto 8px; display:block; border-radius:8px; background:#fff; padding:4px; }
+
+.product-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:15px; }
+.select-card { border:2px solid #e2e8f0; padding:14px; border-radius:8px; cursor:pointer; transition:.2s; background:#fff; text-align:center; font-weight:600; font-size:14px; color:#334155; }
+.select-card:hover { border-color:#93c5fd; }
+.select-card.selected { border-color:#2563eb; background:#eff6ff; color:#1d4ed8; }
+.select-card i { font-size:16px; }
+.select-card.disabled { opacity:.55; cursor:not-allowed; background:#f8fafc; position:relative; }
+.select-card.disabled:hover { border-color:#e2e8f0; }
+.select-card .card-coming-soon { display:block; margin-top:4px; font-size:10px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:.04em; }
+.product-empty { grid-column:1/-1; padding:16px; text-align:center; color:#94a3b8; font-size:13px; border:1px dashed #e2e8f0; border-radius:8px; }
+
+.cover-option.disabled-option { display:none; }
+
+.form-group { margin-bottom:15px; }
+.form-group label { display:block; margin-bottom:5px; font-weight:600; font-size:14px; color:#475569; }
+.form-group input, .form-group select, .form-group textarea {
+    width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px;
+    box-sizing:border-box; font-size:14px; color:#1e293b; background:#fff;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.1);
+}
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:15px; }
+
+#reviewBox { background:#f8fafc; border:1px solid #e2e8f0; padding:18px; border-radius:8px; margin-bottom:18px; line-height:1.8; font-size:14px; }
+#reviewBox hr { border:0; border-top:1px solid #cbd5e1; margin:12px 0; }
+
+.nav-buttons { display:flex; justify-content:space-between; margin-top:20px; gap:10px; }
+
+.period-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-top:10px; }
+.period-card { border:2px solid #e2e8f0; border-radius:8px; padding:10px; cursor:default; text-align:center; transition:.2s; background:#fff; }
+.period-card.selected { border-color:#2563eb; background:#eff6ff; }
+.period-card .p-label { font-size:11px; color:#64748b; }
+.period-card .p-price { font-size:15px; font-weight:700; color:#1e293b; margin-top:3px; }
+
+.buy-cover-btn {
+    display:inline-flex; align-items:center; gap:8px;
+    background:linear-gradient(135deg,#16a34a,#15803d);
+    color:#fff; border:none; padding:14px 28px; border-radius:8px;
+    font-size:16px; font-weight:700; cursor:pointer; margin-top:12px;
+    box-shadow:0 4px 12px rgba(22,163,74,.3); transition:.2s;
+}
+.buy-cover-btn:hover { transform:translateY(-1px); box-shadow:0 6px 16px rgba(22,163,74,.4); }
+.buy-cover-btn:disabled { opacity:.6; cursor:not-allowed; transform:none; }
+
+.quote-result-card {
+    background:#f0fdf4; border:1px solid #bbf7d0;
+    border-left:4px solid #10b981; border-radius:8px; padding:20px; margin-top:20px;
+}
+.quote-result-card .amount { font-size:28px; font-weight:700; color:#15803d; }
+
+.upload-area { border:2px dashed #cbd5e1; border-radius:8px; padding:20px; text-align:center; background:#f8fafc; cursor:pointer; transition:.2s; }
+.upload-area:hover { border-color:#93c5fd; background:#eff6ff; }
+.upload-area input { display:none; }
+
+.step-indicator { display:flex; gap:0; margin-bottom:24px; }
+.step-dot { flex:1; height:4px; background:#e2e8f0; border-radius:2px; margin:0 3px; transition:.3s; }
+.step-dot.active { background:#2563eb; }
+.step-dot.done   { background:#10b981; }
+
+#tonnageRow { display:none; }
+#paxRow { display:none; }
+
+#subTypeRow { display:none; margin-top:10px; }
+.subtype-chip-row { display:flex; gap:8px; flex-wrap:wrap; }
+.subtype-chip {
+    border:2px solid #e2e8f0; border-radius:20px; padding:7px 16px;
+    font-size:13px; font-weight:600; color:#334155; cursor:pointer; transition:.2s; background:#fff;
+}
+.subtype-chip:hover { border-color:#93c5fd; }
+.subtype-chip.selected { border-color:#2563eb; background:#eff6ff; color:#1d4ed8; }
+
+.loading-note { grid-column:1/-1; text-align:center; padding:16px; color:#94a3b8; font-size:13px; }
+
+/* ── NEW: double-insurance + DMVIC status styling ─────────────────────── */
+.double-insurance-banner {
+    background:#fef2f2; border:1px solid #fecaca; border-left:4px solid #dc2626;
+    border-radius:8px; padding:14px 16px; margin-bottom:16px;
+}
+.double-insurance-banner p { margin:0; color:#991b1b; font-size:14px; font-weight:700; }
+.double-insurance-banner small { color:#b91c1c; font-weight:400; display:block; margin-top:4px; }
+
+.dmvic-status-box { margin-top:14px; padding:12px 14px; border-radius:8px; font-size:13px; }
+.dmvic-status-box.pending { background:#fffbeb; border:1px solid #fde68a; color:#92400e; }
+.dmvic-status-box.issued  { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
+.dmvic-status-box.failed  { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; }
+.dmvic-status-box.manual  { background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; }
+</style>
+</head>
+
+<body>
+
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="openSidebar()">
+        <i class="fas fa-bars"></i>
+    </button>
+    <span class="brand">WESTLAKE</span>
+    <button class="logout-btn" onclick="logout()" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
+        <i class="fas fa-sign-out-alt"></i>
+    </button>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<div class="app-container">
+
+<aside class="sidebar">
+    <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()"><i class="fas fa-times"></i></button></div>
+    <ul class="nav-links">
+        <li><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        <li class="active"><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> Quotation</a></li>
+        <li><a href="/clients"><i class="fas fa-users"></i> Clients</a></li>
+        <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
+        <li><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li><a href="/privacy"><i class="fas fa-shield-alt"></i> privacy policy</a></li>
+        <li><a href="/terms"><i class="fas fa-gavel"></i> terms and conditions</a></li>
+    </ul>
+</aside>
+
+<main class="main-content">
+
+<div class="top-header">
+    <h1>Insurance Quotation Wizard</h1>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+</div>
+
+<p style="color:#64748b; margin-bottom:8px;">Step <span id="currentStep">1</span> of 4</p>
+<div class="step-indicator" id="stepDots">
+    <div class="step-dot active" id="dot1"></div>
+    <div class="step-dot" id="dot2"></div>
+    <div class="step-dot" id="dot3"></div>
+    <div class="step-dot" id="dot4"></div>
+</div>
+
+<div id="step_error" style="display:none; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; padding:10px 14px; margin-bottom:16px; border-radius:6px; font-size:14px;"></div>
+
+<!-- STEP 1 — Policy Info -->
+<div class="step active" id="step1">
+<div class="form-card">
+<h2><i class="fas fa-file-alt" style="color:#2563eb;"></i> Step 1 — Insurance Details</h2>
+
+<div class="form-group">
+    <label>Insurance Company *</label>
+    <div class="insurer-grid">
+        <div class="insurer-card" data-value="monarch">
+            <img class="insurer-logo-img" src="/css/images/monarch.png" alt="Monarch"><h3>Monarch</h3><p>Motor Insurance</p>
+        </div>
+        <div class="insurer-card" data-value="directline">
+            <img class="insurer-logo-img" src="/css/images/directline.png" alt="Directline"><h3>Directline</h3><p>Comprehensive Cover</p>
+        </div>
+        <div class="insurer-card" data-value="definite">
+            <img class="insurer-logo-img" src="/css/images/definite.png" alt="Definite"><h3>Definite</h3><p>Flexible Protection</p>
+        </div>
+        <div class="insurer-card disabled" data-value="jubilee" data-disabled="true">
+            <div class="insurer-logo">J</div><h3>Jubilee</h3><p class="coming-soon-tag">Coming Soon</p>
+        </div>
+        <div class="insurer-card disabled" data-value="britam" data-disabled="true">
+            <div class="insurer-logo">B</div><h3>Britam</h3><p class="coming-soon-tag">Coming Soon</p>
+        </div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="form-group">
+        <label for="type_of_cover">Type of Cover *</label>
+        <select id="type_of_cover">
+            <option value="">— Select —</option>
+            <option class="cover-option" value="comprehensive">Comprehensive</option>
+            <option class="cover-option" value="third_party_only">Third Party Only</option>
+            <option class="cover-option" value="third_party_fire_theft">Third Party Fire &amp; Theft</option>
+        </select>
+        <small id="coverHint" style="color:#94a3b8;"></small>
+    </div>
+    <div class="form-group">
+        <label for="type_of_certificate">Certificate Type *</label>
+        <select id="type_of_certificate">
+            <option value="">— Select —</option>
+            <option value="annual">Annual</option>
+            <option value="30_days">30 Days</option>
+            <option value="14_days">14 Days</option>
+            <option value="7_days">7 Days</option>
+            <option value="inst_3">3 Instalments</option>
+            <option value="inst_6">6 Instalments</option>
+            <option value="inst_9">9 Instalments</option>
+            <option value="inst_10">2 Instalments</option>
+        </select>
+    </div>
+</div>
+
+<div class="form-group">
+    <label>Product * <span id="productInsurerLabel" style="font-weight:400; color:#94a3b8;"></span></label>
+    <div class="product-grid" id="productGrid">
+        <div class="loading-note">Select an insurance company above to see available products.</div>
+    </div>
+
+    <div id="subTypeRow">
+        <label style="font-size:12px; color:#94a3b8; margin-top:8px;" id="subTypeLabel">Use Type *</label>
+        <div class="subtype-chip-row" id="subTypeChips"></div>
+    </div>
+</div>
+
+<div class="form-group">
+    <label>Policy Validity *</label>
+    <div class="grid-2">
+        <div>
+            <label for="commencing_date" style="font-size:12px; color:#94a3b8;">Commencing</label>
+            <input type="date" id="commencing_date" onchange="setExpiry(this.value)">
+        </div>
+        <div>
+            <label for="expiry_date" style="font-size:12px; color:#94a3b8;">Expiry</label>
+            <input type="date" id="expiry_date">
+        </div>
+    </div>
+</div>
+
+<div class="nav-buttons">
+    <div></div>
+    <button onclick="nextStep()">Next <i class="fas fa-arrow-right"></i></button>
+</div>
+</div>
+</div>
+
+<!-- STEP 2 — Insured Info -->
+<div class="step" id="step2">
+<div class="form-card">
+<h2><i class="fas fa-user" style="color:#2563eb;"></i> Step 2 — Insured Details</h2>
+
+<div class="grid-2">
+    <div class="form-group">
+        <label for="policy_holder_name">Full Name *</label>
+        <input id="policy_holder_name" placeholder="Full Name">
+    </div>
+    <div class="form-group">
+        <label for="kra_pin">KRA PIN *</label>
+        <input id="kra_pin" placeholder="A000000000X" style="text-transform:uppercase;">
+    </div>
+</div>
+<div class="grid-2">
+    <div class="form-group">
+        <label for="phone">Phone Number *</label>
+        <input id="phone" placeholder="07XXXXXXXX">
+    </div>
+    <div class="form-group">
+        <label for="email">Email Address *</label>
+        <input id="email" type="email" placeholder="email@example.com">
+    </div>
+</div>
+<div class="grid-2">
+    <div class="form-group">
+        <label for="id_number">ID / Passport Number *</label>
+        <input id="id_number" placeholder="National ID or Passport No.">
+    </div>
+    <div class="form-group">
+        <label for="postal_address">Postal Address *</label>
+        <input id="postal_address" placeholder="e.g. P.O. Box 1234-00100, Nairobi">
+    </div>
+</div>
+
+<div class="form-group">
+    <label>KRA Certificate * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span></label>
+    <div class="upload-area" onclick="document.getElementById('kra_file').click()">
+        <i class="fas fa-cloud-upload-alt" style="font-size:24px; color:#94a3b8;"></i>
+        <p style="margin:8px 0 0; color:#64748b; font-size:14px;" id="kraFileLabel">Click to upload KRA Certificate</p>
+        <input type="file" id="kra_file" accept=".pdf,.jpg,.jpeg,.png" onchange="updateFileLabel('kra_file','kraFileLabel')">
+    </div>
+</div>
+<div class="form-group">
+    <label>National ID Copy * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span></label>
+    <div class="upload-area" onclick="document.getElementById('id_file').click()">
+        <i class="fas fa-id-card" style="font-size:24px; color:#94a3b8;"></i>
+        <p style="margin:8px 0 0; color:#64748b; font-size:14px;" id="idFileLabel">Click to upload National ID</p>
+        <input type="file" id="id_file" accept=".pdf,.jpg,.jpeg,.png" onchange="updateFileLabel('id_file','idFileLabel')">
+    </div>
+</div>
+
+<div class="nav-buttons">
+    <button onclick="prevStep()"><i class="fas fa-arrow-left"></i> Back</button>
+    <button onclick="nextStep()">Next <i class="fas fa-arrow-right"></i></button>
+</div>
+</div>
+</div>
+
+<!-- STEP 3 — Vehicle Info -->
+<div class="step" id="step3">
+<div class="form-card">
+<h2><i class="fas fa-car" style="color:#2563eb;"></i> Step 3 — Vehicle Details</h2>
+
+<div class="grid-2">
+    <div class="form-group">
+        <label for="vehicle_reg">Registration No *</label>
+        <input id="vehicle_reg" placeholder="KBC 123X" style="text-transform:uppercase;">
+    </div>
+    <div class="form-group">
+        <label for="make">Make / Model *</label>
+        <input id="make" placeholder="e.g. Toyota Hiace">
+    </div>
+</div>
+<div class="grid-2">
+    <div class="form-group">
+        <label for="chassis_number">Chassis Number *</label>
+        <input id="chassis_number" placeholder="Chassis No" style="text-transform:uppercase;">
+    </div>
+    <div class="form-group">
+        <label for="engine_number">Engine Number *</label>
+        <input id="engine_number" placeholder="Engine No" style="text-transform:uppercase;">
+    </div>
+</div>
+<div class="grid-2">
+    <div class="form-group">
+        <label for="vehicle_body_type">Body Type *</label>
+        <input id="vehicle_body_type" placeholder="e.g. Saloon, Pickup, Minibus">
+    </div>
+    <div class="form-group">
+        <label for="passengers_licensed_to_carry">Seats / Passengers *</label>
+        <input id="passengers_licensed_to_carry" type="number" min="1" placeholder="e.g. 5">
+    </div>
+</div>
+<div class="grid-2">
+    <div class="form-group">
+        <label for="year_of_manufacture">Year of Manufacture *</label>
+        <input id="year_of_manufacture" type="number" min="1970" max="2026" placeholder="e.g. 2019">
+        <small style="color:#64748b;">Comprehensive cover max age varies by insurer/class (typically 15–20 yrs).</small>
+    </div>
+    <div class="form-group">
+        <label for="year_of_registration">Year of Registration *</label>
+        <input id="year_of_registration" type="number" min="1970" max="2026" placeholder="e.g. 2019">
+        <small style="color:#64748b;">Year the vehicle was first registered in Kenya, if different from year of manufacture. Required by DMVIC for certificate issuance.</small>
+    </div>
+</div>
+
+<div class="form-group" id="tonnageRow">
+    <label for="tonnage">Tonnage (Commercial Vehicle) *</label>
+    <input id="tonnage" type="number" min="0" step="0.1" placeholder="e.g. 3.5">
+</div>
+
+<div class="form-group" id="paxRow">
+    <label for="pax">Number of Passengers (for TPO banding) *</label>
+    <input id="pax" type="number" min="0" placeholder="e.g. 14">
+    <small style="color:#64748b;">Used to place this vehicle in the correct passenger-band for Third Party Only premiums.</small>
+</div>
+
+<div class="form-group">
+    <label for="vehicle_value">Vehicle Value (KES) *</label>
+    <input id="vehicle_value" type="number" min="0" placeholder="e.g. 1500000">
+    <small style="color:#64748b;">Required for Comprehensive &amp; TPFT. Not required for Third Party Only.</small>
+</div>
+
+<div class="nav-buttons">
+    <button onclick="prevStep()"><i class="fas fa-arrow-left"></i> Back</button>
+    <button onclick="goToReview()">Review <i class="fas fa-arrow-right"></i></button>
+</div>
+</div>
+</div>
+
+<!-- STEP 4 — Review & Generate -->
+<div class="step" id="step4">
+<div class="form-card">
+<h2><i class="fas fa-check-circle" style="color:#10b981;"></i> Step 4 — Review &amp; Generate</h2>
+<div id="reviewBox"></div>
+
+<div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <button onclick="generateQuote()" id="genBtn"><i class="fas fa-calculator"></i> Generate Quote</button>
+    <button onclick="prevStep()" style="background:#64748b;"><i class="fas fa-arrow-left"></i> Back</button>
+</div>
+
+<div id="quoteResult" style="display:none;"></div>
+</div>
+</div>
+
+</main>
+</div>
+
+<script>
+let currentStep = 1;
+
+// CSRF token, read once from the meta tag rendered by Flask-WTF.
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+function withCsrf(headers = {}) {
+    return { ...headers, 'X-CSRFToken': CSRF_TOKEN };
+}
+
+const data = {
+    company:null, type_of_cover:'', type_of_certificate:'',
+    product:null, sub_type:null, pax:0, commencing_date:'', expiry_date:'',
+    policy_holder_name:'', email:'', phone:'', kra_pin:'', id_number:'', postal_address:'',
+    vehicle_reg:'', chassis_number:'', vehicle_body_type:'',
+    engine_number:'', make:'', seats:0, vehicle_value:0, tonnage:0,
+    year_of_manufacture:'', year_of_registration:''
+};
+
+let INSURER_CATALOG = {};
+
+const SUBTYPE_GROUPS = {
+    tuktuk: {
+        label: 'TukTuk Use *',
+        chips: [
+            { value:'tuktuk_commercial', label:'Commercial' },
+            { value:'tuktuk_psv',        label:'PSV (Passenger)' },
+        ]
+    },
+    motorcycle_psv_rating: {
+        label: 'Motorcycle PSV Basis *',
+        chips: [
+            { value:'scheme',     label:'Scheme / Sacco' },
+            { value:'individual', label:'Individual' },
+        ]
+    },
+    commercial_hybrid_type: {
+        label: 'Commercial Use Type *',
+        chips: [
+            { value:'own_goods',       label:'Own Goods' },
+            { value:'general_cartage', label:'General Cartage' },
+            { value:'prime_mover',     label:'Prime Mover' },
+        ]
+    }
+};
+
+// Private, Commercial (own goods / general cartage / hybrid), and now
+// private Motorcycle (non-PSV, Type D issuance) are live for sale.
+// PSV and every other category (institutional, agriculture, motor trade,
+// tuktuk, driving school, special vehicles, motorcycle_psv, etc.) are
+// shown but marked Coming Soon until underwriting is set up for them —
+// Westlake does not offer PSV cover.
+const ACTIVE_PRODUCT_KEYS = new Set([
+    'private', 'private_fleet',
+    'commercial_own_goods', 'general_cartage', 'commercial_hybrid',
+    'motorcycle',
+]);
+
+const PAX_BANDED_PRODUCTS = new Set([
+    'institutional', 'tour_service', 'private_hire_chauffeur', 'private_hire_self', 'driving_school_heavy'
+]);
+
+const TONNAGE_PRODUCTS = new Set([
+    'commercial_vehicle', 'commercial_own_goods', 'general_cartage', 'commercial_hybrid'
+]);
+
+async function loadInsurerCatalog() {
+    try {
+        const res = await fetch('/api/insurers/products');
+        const r = await res.json();
+        INSURER_CATALOG = r.insurers || {};
+    } catch (err) {
+        showError('Could not load insurer product list. Please refresh the page.');
+    }
+}
+
+function showStep() {
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    document.getElementById('step' + currentStep).classList.add('active');
+    document.getElementById('currentStep').innerText = currentStep;
+
+    for (let i=1; i<=4; i++) {
+        const dot = document.getElementById('dot'+i);
+        dot.className = 'step-dot' +
+            (i < currentStep ? ' done' : i === currentStep ? ' active' : '');
+    }
+
+    clearError();
+    window.scrollTo(0,0);
+}
+
+function showError(msg) {
+    const el = document.getElementById('step_error');
+    el.innerText = msg;
+    el.style.display = 'block';
+    window.scrollTo(0,0);
+}
+function clearError() {
+    const el = document.getElementById('step_error');
+    el.innerText = '';
+    el.style.display = 'none';
+}
+
+function setExpiry(start) {
+    if (!start) return;
+    const d = new Date(start);
+    d.setFullYear(d.getFullYear() + 1);
+    d.setDate(d.getDate() - 1);
+    document.getElementById('expiry_date').value = d.toISOString().split('T')[0];
+    data.commencing_date = start;
+    data.expiry_date = document.getElementById('expiry_date').value;
+}
+
+document.getElementById('expiry_date').addEventListener('change', function() { data.expiry_date = this.value; });
+
+document.querySelectorAll('.insurer-card').forEach(c => {
+    c.onclick = () => {
+        if (c.dataset.disabled === 'true') {
+            showError(`${c.querySelector('h3').innerText} is coming soon. Please choose another insurer for now.`);
+            return;
+        }
+        document.querySelectorAll('.insurer-card').forEach(i => i.classList.remove('selected'));
+        c.classList.add('selected');
+        data.company = c.dataset.value;
+
+        data.product = null;
+        data.sub_type = null;
+        document.getElementById('type_of_cover').value = '';
+        document.getElementById('coverHint').innerText = '';
+        document.getElementById('subTypeRow').style.display = 'none';
+        document.getElementById('tonnageRow').style.display = 'none';
+        document.getElementById('paxRow').style.display = 'none';
+
+        renderProductGrid(c.dataset.value);
+        document.getElementById('productInsurerLabel').innerText =
+            `— showing products offered by ${cap(c.dataset.value)}`;
+    };
+});
+
+function renderProductGrid(company) {
+    const grid = document.getElementById('productGrid');
+    const catalog = INSURER_CATALOG[company];
+
+    if (!catalog) {
+        grid.innerHTML = '<div class="product-empty">No product catalog available for this insurer yet.</div>';
+        return;
+    }
+
+    const entries = Object.entries(catalog);
+    const seen = new Set();
+    let html = '';
+
+    entries.forEach(([key, info]) => {
+        if (seen.has(key)) return;
+
+        if (key === 'tuktuk_commercial' || key === 'tuktuk_psv') {
+            if (seen.has('tuktuk_commercial') || seen.has('tuktuk_psv')) return;
+            seen.add('tuktuk_commercial'); seen.add('tuktuk_psv');
+            // Neither tuktuk sub-type is currently active — whole tile is Coming Soon.
+            html += `<div class="select-card product-card disabled" data-value="tuktuk" data-group="tuktuk" data-disabled="true">
+                        <i class="fas fa-shuttle-van"></i><br>TukTuk<span class="card-coming-soon">Coming Soon</span></div>`;
+            return;
+        }
+
+        seen.add(key);
+        const icon = info.icon || 'fa-car';
+        const isActive = ACTIVE_PRODUCT_KEYS.has(key);
+        html += `<div class="select-card product-card${isActive ? '' : ' disabled'}" data-value="${key}"${isActive ? '' : ' data-disabled="true"'}>
+                    <i class="fas ${icon}"></i><br>${esc(info.label)}${isActive ? '' : '<span class="card-coming-soon">Coming Soon</span>'}</div>`;
+    });
+
+    grid.innerHTML = html || '<div class="product-empty">No products configured for this insurer.</div>';
+    wireProductCards();
+}
+
+function wireProductCards() {
+    document.querySelectorAll('.product-card').forEach(c => {
+        c.onclick = () => {
+            if (c.dataset.disabled === 'true') {
+                const label = c.innerText.replace('Coming Soon', '').trim();
+                showError(`${label} is coming soon — we currently only offer Private and Commercial (Own Goods / General Cartage) cover.`);
+                return;
+            }
+            document.querySelectorAll('.product-card').forEach(p => p.classList.remove('selected'));
+            c.classList.add('selected');
+
+            const subTypeRow = document.getElementById('subTypeRow');
+            const tonnageRow = document.getElementById('tonnageRow');
+            const paxRow     = document.getElementById('paxRow');
+            const val = c.dataset.value;
+            data.sub_type = null;
+
+            if (val === 'tuktuk') {
+                renderSubTypeChips('tuktuk');
+                subTypeRow.style.display = 'block';
+                data.product = null;
+                tonnageRow.style.display = 'none';
+                paxRow.style.display = 'none';
+            } else {
+                subTypeRow.style.display = 'none';
+                data.product = val;
+
+                if (data.company === 'definite' && val === 'motorcycle_psv') {
+                    renderSubTypeChips('motorcycle_psv_rating');
+                    subTypeRow.style.display = 'block';
+                }
+
+                if (data.company === 'definite' && val === 'commercial_hybrid') {
+                    renderSubTypeChips('commercial_hybrid_type');
+                    subTypeRow.style.display = 'block';
+                }
+
+                tonnageRow.style.display = TONNAGE_PRODUCTS.has(val) ? 'block' : 'none';
+                paxRow.style.display     = PAX_BANDED_PRODUCTS.has(val) ? 'block' : 'none';
+            }
+
+            updateCoverOptions();
+        };
+    });
+}
+
+function renderSubTypeChips(groupKey) {
+    const cfg = SUBTYPE_GROUPS[groupKey];
+    document.getElementById('subTypeLabel').innerText = cfg.label;
+    const wrap = document.getElementById('subTypeChips');
+    wrap.innerHTML = cfg.chips.map(ch =>
+        `<div class="subtype-chip" data-value="${ch.value}">${esc(ch.label)}</div>`
+    ).join('');
+    wrap.querySelectorAll('.subtype-chip').forEach(chip => {
+        chip.onclick = () => {
+            wrap.querySelectorAll('.subtype-chip').forEach(s => s.classList.remove('selected'));
+            chip.classList.add('selected');
+
+            if (groupKey === 'tuktuk') {
+                data.product  = chip.dataset.value;
+                data.sub_type = null;
+                document.getElementById('tonnageRow').style.display =
+                    (chip.dataset.value === 'tuktuk_commercial') ? 'block' : 'none';
+            } else if (groupKey === 'motorcycle_psv_rating') {
+                data.sub_type = chip.dataset.value;
+            } else if (groupKey === 'commercial_hybrid_type') {
+                data.sub_type = chip.dataset.value;
+            }
+            updateCoverOptions();
+        };
+    });
+}
+
+function updateCoverOptions() {
+    const coverSelect = document.getElementById('type_of_cover');
+    const hint = document.getElementById('coverHint');
+    const catalog = INSURER_CATALOG[data.company] || {};
+    const info = catalog[data.product];
+
+    coverSelect.querySelectorAll('.cover-option').forEach(opt => {
+        opt.classList.remove('disabled-option');
+        opt.disabled = false;
+    });
+
+    if (!info) {
+        hint.innerText = '';
+        return;
+    }
+
+    const allowed = new Set(info.covers || []);
+    coverSelect.querySelectorAll('.cover-option').forEach(opt => {
+        if (!allowed.has(opt.value)) {
+            opt.classList.add('disabled-option');
+            opt.disabled = true;
+        }
+    });
+
+    if (coverSelect.value && !allowed.has(coverSelect.value)) {
+        coverSelect.value = '';
+    }
+
+    const coverLabels = { comprehensive:'Comprehensive', third_party_only:'Third Party Only', third_party_fire_theft:'Third Party Fire & Theft' };
+    hint.innerText = `Available cover for ${info.label}: ${[...allowed].map(c => coverLabels[c] || c).join(', ')}`;
+}
+
+function updateFileLabel(inputId, labelId) {
+    const f = document.getElementById(inputId).files[0];
+    if (f) document.getElementById(labelId).innerText = '✓ ' + f.name;
+}
+
+function nextStep() {
+    if (currentStep === 1) {
+        data.type_of_cover       = document.getElementById('type_of_cover').value;
+        data.type_of_certificate = document.getElementById('type_of_certificate').value;
+        data.commencing_date     = document.getElementById('commencing_date').value;
+        data.expiry_date         = document.getElementById('expiry_date').value;
+
+        if (!data.company)             return showError('Please select an insurance company.');
+        if (!data.product)             return showError('Please select a product (and use type, where applicable).');
+        if (data.company === 'definite' && data.product === 'commercial_hybrid' && !data.sub_type)
+            return showError('Please select a Commercial Use Type (Own Goods / General Cartage / Prime Mover).');
+        if (!data.type_of_cover)       return showError('Please select a type of cover.');
+        if (!data.type_of_certificate) return showError('Please select a certificate type.');
+        if (!data.commencing_date)     return showError('Please enter the commencing date.');
+        if (!data.expiry_date)         return showError('Please enter the expiry date.');
+
+        const catalog = INSURER_CATALOG[data.company] || {};
+        const info = catalog[data.product];
+        if (info && !(info.covers || []).includes(data.type_of_cover)) {
+            return showError(`${cap(data.company)} does not offer ${data.type_of_cover.replace(/_/g,' ')} cover for ${info.label}.`);
+        }
+    }
+
+    if (currentStep === 2) {
+        data.policy_holder_name = document.getElementById('policy_holder_name').value.trim();
+        data.phone               = document.getElementById('phone').value.trim();
+        data.email                = document.getElementById('email').value.trim();
+        data.kra_pin              = document.getElementById('kra_pin').value.trim().toUpperCase();
+        data.id_number            = document.getElementById('id_number').value.trim();
+        data.postal_address       = document.getElementById('postal_address').value.trim();
+
+        if (!data.policy_holder_name) return showError('Full name is required.');
+        if (!data.phone)              return showError('Phone number is required.');
+        if (!data.kra_pin)            return showError('KRA PIN is required.');
+        if (!data.email)              return showError('Email address is required.');
+        if (!data.id_number)          return showError('ID / Passport number is required.');
+        if (!data.postal_address)     return showError('Postal address is required.');
+        if (!document.getElementById('kra_file').files[0]) return showError('Please upload your KRA Certificate.');
+        if (!document.getElementById('id_file').files[0])  return showError('Please upload your National ID copy.');
+    }
+
+    currentStep++;
+    showStep();
+}
+
+function prevStep() {
+    if (currentStep > 1) { currentStep--; showStep(); }
+}
+
+function goToReview() {
+    const reg     = document.getElementById('vehicle_reg').value.trim().toUpperCase();
+    const chassis = document.getElementById('chassis_number').value.trim().toUpperCase();
+    const body    = document.getElementById('vehicle_body_type').value.trim();
+    const engine  = document.getElementById('engine_number').value.trim().toUpperCase();
+    const make    = document.getElementById('make').value.trim();
+    const seats   = parseInt(document.getElementById('passengers_licensed_to_carry').value) || 0;
+    const value   = parseFloat(document.getElementById('vehicle_value').value) || 0;
+    const tonnage = parseFloat(document.getElementById('tonnage').value) || 0;
+    const pax     = parseInt(document.getElementById('pax').value) || 0;
+    const yom     = document.getElementById('year_of_manufacture').value.trim();
+    const yor     = document.getElementById('year_of_registration').value.trim();
+
+    if (!reg || !chassis || !body || !make || !engine) return showError('Please complete all required vehicle fields.');
+    if (seats < 1)                           return showError('Please enter the number of seats.');
+    if (!yom)                                return showError('Year of manufacture is required.');
+    if (!yor)                                return showError('Year of registration is required.');
+    if (data.type_of_cover !== 'third_party_only' && value <= 0)
+        return showError('Vehicle value is required for this cover type.');
+    if (document.getElementById('tonnageRow').style.display !== 'none' && tonnage <= 0)
+        return showError('Tonnage is required for this vehicle type.');
+    if (document.getElementById('paxRow').style.display !== 'none' && pax <= 0)
+        return showError('Number of passengers is required for this vehicle type.');
+
+    Object.assign(data, { vehicle_reg:reg, chassis_number:chassis, vehicle_body_type:body,
+                           engine_number:engine, make, seats, vehicle_value:value, tonnage, pax,
+                           year_of_manufacture: yom, year_of_registration: yor });
+
+    const CERT_LABELS = { annual:'Annual','30_days':'30 Days','14_days':'14 Days','7_days':'7 Days', inst_3:'3 Instalments',inst_6:'6 Instalments',inst_9:'9 Instalments',inst_10:'2 Instalments' };
+    const catalog  = INSURER_CATALOG[data.company] || {};
+    const prodInfo = catalog[data.product];
+    const productLabel = prodInfo ? prodInfo.label : fmtEnum(data.product);
+
+    document.getElementById('reviewBox').innerHTML = `
+        <p><strong>Insurer:</strong> ${cap(data.company)}</p>
+        <p><strong>Cover:</strong> ${fmtEnum(data.type_of_cover)}</p>
+        <p><strong>Certificate:</strong> ${CERT_LABELS[data.type_of_certificate]||data.type_of_certificate}</p>
+        <p><strong>Product:</strong> ${esc(productLabel)}${data.sub_type ? ' — ' + fmtEnum(data.sub_type) : ''}</p>
+        <p><strong>Timeline:</strong> ${data.commencing_date} → ${data.expiry_date}</p>
+        <hr>
+        <p><strong>Policy Holder:</strong> ${esc(data.policy_holder_name)} &nbsp;|&nbsp; PIN: ${esc(data.kra_pin)}</p>
+        <p><strong>Contact:</strong> ${esc(data.phone)}${data.email ? ' &nbsp;|&nbsp; '+esc(data.email) : ''}</p>
+        ${data.id_number ? `<p><strong>ID/Passport:</strong> ${esc(data.id_number)}</p>` : ''}
+        ${data.postal_address ? `<p><strong>Postal Address:</strong> ${esc(data.postal_address)}</p>` : ''}
+        <hr>
+        <p><strong>Vehicle:</strong> ${esc(data.vehicle_reg)} — ${esc(data.make)}</p>
+        <p><strong>Chassis:</strong> ${esc(data.chassis_number)} &nbsp;|&nbsp; <strong>Engine:</strong> ${esc(data.engine_number)||'—'}</p>
+        <p><strong>Body:</strong> ${esc(data.vehicle_body_type)} &nbsp;|&nbsp; <strong>Seats:</strong> ${data.seats}</p>
+        ${data.year_of_manufacture ? `<p><strong>Year of Manufacture:</strong> ${esc(data.year_of_manufacture)}</p>` : ''}
+        ${data.year_of_registration ? `<p><strong>Year of Registration:</strong> ${esc(data.year_of_registration)}</p>` : ''}
+        ${data.vehicle_value > 0 ? `<p><strong>Vehicle Value:</strong> KES ${data.vehicle_value.toLocaleString()}</p>` : ''}
+        ${data.tonnage > 0       ? `<p><strong>Tonnage:</strong> ${data.tonnage} T</p>` : ''}
+        ${data.pax > 0           ? `<p><strong>Passenger Band Basis:</strong> ${data.pax} pax</p>` : ''}
+    `;
+
+    currentStep = 4;
+    showStep();
+}
+
+let lastQuoteId = null;
+
+async function generateQuote() {
+    const btn = document.getElementById('genBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…';
+
+    const container = document.getElementById('quoteResult');
+    container.style.display = 'none';
+    clearError();
+
+    try {
+        const res  = await fetch('/api/quotations/generate', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(data)
+        });
+        const r = await res.json();
+
+        if (!res.ok) { showError(r.error || 'Failed to generate quotation.'); currentStep = 1; showStep(); return; }
+
+        lastQuoteId = r.quote.id;
+
+        const PERIOD_LABELS = {
+            '30_days':'30 Days','14_days':'14 Days','7_days':'7 Days',inst_2:'2 inst.',
+            annual:'Annual',inst_3:'3 Inst.',inst_6:'6 Inst.',inst_9:'9 Inst.',inst_10:'2 Inst.'
+        };
+
+        let breakdownHtml = '';
+        if (r.period_breakdown) {
+            breakdownHtml = `
+                <p style="font-weight:600; margin:16px 0 8px; font-size:13px; color:#475569;">ALL PERIOD OPTIONS</p>
+                <div class="period-grid">
+                    ${Object.entries(r.period_breakdown).map(([k,v]) => `
+                        <div class="period-card ${k===data.type_of_certificate?'selected':''}">
+                            <div class="p-label">${PERIOD_LABELS[k]||k}</div>
+                            <div class="p-price">KES ${Number(v).toLocaleString()}</div>
+                        </div>
+                    `).join('')}
+                </div>`;
+        }
+
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="quote-result-card">
+                <p style="color:#15803d; font-weight:700; font-size:15px; margin:0 0 12px;">
+                    <i class="fas fa-check-circle"></i> Quotation Generated
+                    <span style="font-family:monospace; margin-left:8px;">${esc(r.quote.id)}</span>
+                </p>
+                <div style="display:flex; gap:24px; flex-wrap:wrap; margin-bottom:16px;">
+                    <div>
+                        <div style="font-size:12px; color:#64748b;">Base Premium</div>
+                        <div style="font-size:20px; font-weight:700;">KES ${Number(r.quote.base_premium).toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b;">Levies &amp; Taxes</div>
+                        <div style="font-size:20px; font-weight:700;">KES ${Number(r.quote.levies_and_taxes).toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b;">Total Payable</div>
+                        <div class="amount">KES ${Number(r.quote.total_payable).toLocaleString()}</div>
+                    </div>
+                </div>
+                ${breakdownHtml}
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px;">
+                    <button onclick="window.location.href='/api/quotations/pdf/${esc(r.quote.id)}'"
+                        style="background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe;">
+                        <i class="fas fa-file-pdf"></i> Download PDF
+                    </button>
+                    <button onclick="window.print()"
+                        style="background:#f1f5f9; color:#475569;">
+                        <i class="fas fa-print"></i> Print
+                    </button>
+                    <button onclick="location.reload()"
+                        style="background:#f1f5f9; color:#475569;">
+                        <i class="fas fa-plus"></i> New Quote
+                    </button>
+                </div>
+
+                <div style="margin-top:20px; padding-top:16px; border-top:1px solid #bbf7d0;">
+                    <p style="font-size:13px; color:#064e3b; margin:0 0 10px;">
+                        <i class="fas fa-info-circle"></i>
+                        Ready to proceed? Buy Cover to create an active policy for this client.
+                    </p>
+                    <button class="buy-cover-btn" id="buyCoverBtn" onclick="buyCover('${esc(r.quote.id)}')">
+                        <i class="fas fa-shield-alt"></i> BUY COVER — KES ${Number(r.quote.total_payable).toLocaleString()}
+                    </button>
+                    <div id="buyCoverMsg" style="margin-top:10px; font-size:14px;"></div>
+                </div>
+            </div>`;
+
+    } catch (err) {
+        showError('Network error — please try again.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-calculator"></i> Generate Quote';
+    }
+}
+
+/* ── NEW: check whether this reg/chassis already has an active policy ──── */
+async function checkDoubleInsurance() {
+    const q = (data.vehicle_reg || '').trim();
+    if (q.length < 3) return { has_active_match: false, results: [] };
+    try {
+        const res = await fetch(`/api/policies/check-double-insurance?query=${encodeURIComponent(q)}`);
+        if (!res.ok) return { has_active_match: false, results: [] };
+        return await res.json();
+    } catch (err) {
+        return { has_active_match: false, results: [] };
+    }
+}
+
+async function buyCover(quoteId) {
+    const btn = document.getElementById('buyCoverBtn');
+    const msg = document.getElementById('buyCoverMsg');
+
+    // ── NEW: double-insurance check runs BEFORE the policy is created,
+    // so it's checking against pre-existing policies only (not the one
+    // we're about to create for this same vehicle).
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking for double insurance…';
+    const dbl = await checkDoubleInsurance();
+
+    let proceedAnyway = true;
+    if (dbl.has_active_match) {
+        proceedAnyway = confirm(
+            '⚠️ DOUBLE INSURANCE DETECTED\n\n' +
+            `${data.vehicle_reg} already has an active policy on record.\n` +
+            'DMVIC will very likely reject certificate issuance for this vehicle (error ER005).\n\n' +
+            'Proceed anyway? (Policy will still be created, but DMVIC issuance may fail.)'
+        );
+    }
+    if (!proceedAnyway) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-shield-alt"></i> BUY COVER';
+        return;
+    }
+
+    if (!confirm('Confirm purchase of cover for this client?\nA policy will be created and payment marked as pending.')) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-shield-alt"></i> BUY COVER';
+        return;
+    }
+
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
+    msg.innerText = '';
+
+    try {
+        const res  = await fetch('/api/quotations/buy', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ quote_id: quoteId })
+        });
+        const r = await res.json();
+
+        if (!res.ok) {
+            msg.style.color = '#dc2626';
+            msg.innerText = r.error || 'Failed to create policy.';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-shield-alt"></i> BUY COVER';
+            return;
+        }
+
+        btn.style.display = 'none';
+        const policyPhone = data.phone || '';
+
+        // ── NEW: persistent double-insurance banner (in addition to the
+        // confirm() gate above) so it's visible on-screen after purchase too.
+        const doubleInsuranceBanner = dbl.has_active_match ? `
+            <div class="double-insurance-banner">
+                <p><i class="fas fa-exclamation-triangle"></i> Double Insurance Detected</p>
+                <small>${esc(data.vehicle_reg)} already had an active policy on record when this
+                one was created. DMVIC certificate issuance may be rejected (ER005) — check the
+                certificate status below, or verify with the client before proceeding.</small>
+            </div>` : '';
+
+        msg.innerHTML = `
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-left:4px solid #16a34a; border-radius:6px; padding:16px;">
+                ${doubleInsuranceBanner}
+                <p style="color:#15803d; font-weight:700; margin:0 0 8px;">
+                    <i class="fas fa-check-circle"></i> Policy Created!
+                </p>
+                <p style="font-family:monospace; font-size:15px; margin:0 0 12px;">${esc(r.policy_no)}</p>
+
+                <div id="dmvicStatusBox" class="dmvic-status-box pending">
+                    <i class="fas fa-spinner fa-spin"></i> Issuing DMVIC certificate…
+                </div>
+
+                <p style="font-size:13px; color:#475569; margin:14px 0 10px;">Pay the premium via M-Pesa:</p>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                    <input id="mpesa_phone" placeholder="07XXXXXXXX" value="${esc(policyPhone)}"
+                        style="padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; width:165px; box-sizing:border-box;">
+                    <input id="mpesa_amount" type="number" min="1" placeholder="Amount" value="${r.total_payable || 0}"
+                        style="padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; width:130px; box-sizing:border-box;">
+                    <button onclick="initiateMpesa('${esc(r.policy_no)}')" id="mpesaBtn" data-amount="${r.total_payable || 0}"
+                        style="background:linear-gradient(135deg,#16a34a,#15803d); color:#fff; border:none;
+                               padding:9px 16px; border-radius:6px; font-weight:700; cursor:pointer;
+                               font-size:14px; display:flex; align-items:center; gap:6px;">
+                        <i class="fas fa-mobile-alt"></i> Pay via M-Pesa
+                    </button>
+                </div>
+                <small style="color:#94a3b8;">Defaults to the quoted total — edit if collecting a different amount (e.g. deposit/instalment).</small>
+                <div id="mpesaMsg" style="font-size:13px; margin-top:8px;"></div>
+                <a href="/renewals" style="font-size:13px; color:#2563eb; text-decoration:none;">
+                    <i class="fas fa-sync"></i> View in Renewals
+                </a>
+            </div>`;
+
+        // ── NEW: poll DMVIC issuance status (it runs on a background
+        // worker, so it isn't done the instant buy_cover() returns).
+        pollDmvicStatus(r.policy_no);
+
+    } catch (err) {
+        msg.style.color = '#dc2626';
+        msg.innerText = 'Network error — please try again.';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-shield-alt"></i> BUY COVER';
+    }
+}
+
+/* ── NEW: poll /api/policies/<policy_no>/status until DMVIC settles ────── */
+function pollDmvicStatus(policyNo) {
+    const box = document.getElementById('dmvicStatusBox');
+    if (!box) return;
+
+    let attempts = 0;
+    const maxAttempts = 15; // ~45s at 3s intervals
+
+    const render = (statusData) => {
+        const status = statusData.dmvic_status;
+
+        if (status === 'issued') {
+            box.className = 'dmvic-status-box issued';
+            box.innerHTML = `<i class="fas fa-certificate"></i> <strong>DMVIC Certificate Issued</strong><br>
+                <span style="font-family:monospace;">${esc(statusData.certificate_no || '')}</span>`;
+            return true; // stop polling
+        }
+        if (status === 'failed') {
+            box.className = 'dmvic-status-box failed';
+            box.innerHTML = `<i class="fas fa-times-circle"></i> <strong>DMVIC Issuance Failed</strong><br>
+                <span style="font-size:12px;">${esc(statusData.error || 'Unknown error — check Renewals for status.')}</span>`;
+            return true;
+        }
+        if (status === 'pending_manual') {
+            box.className = 'dmvic-status-box manual';
+            box.innerHTML = `<i class="fas fa-user-clock"></i> <strong>Held for Manual Issuance</strong><br>
+                <span style="font-size:12px;">${esc(statusData.error || 'Needs admin review before DMVIC issuance.')}</span>`;
+            return true;
+        }
+        if (status === 'unsupported') {
+            box.className = 'dmvic-status-box manual';
+            box.innerHTML = `<i class="fas fa-info-circle"></i> <strong>DMVIC Issuance Not Applicable</strong><br>
+                <span style="font-size:12px;">${esc(statusData.error || 'This product is not routed through DMVIC issuance.')}</span>`;
+            return true;
+        }
+        // still 'pending' or null — keep polling
+        return false;
+    };
+
+    const poll = setInterval(async () => {
+        attempts++;
+        try {
+            const res = await fetch(`/api/policies/${encodeURIComponent(policyNo)}/status`);
+            if (res.ok) {
+                const statusData = await res.json();
+                if (render(statusData)) { clearInterval(poll); return; }
+            }
+        } catch { /* keep polling */ }
+
+        if (attempts >= maxAttempts) {
+            clearInterval(poll);
+            box.className = 'dmvic-status-box manual';
+            box.innerHTML = `<i class="fas fa-clock"></i> Still processing — check
+                <a href="/renewals" style="color:#1d4ed8;">Renewals</a> shortly for the final certificate status.`;
+        }
+    }, 3000);
+}
+
+async function initiateMpesa(policyNo, amount) {
+    const phone  = document.getElementById('mpesa_phone')?.value?.trim();
+    const btn    = document.getElementById('mpesaBtn');
+    const msgEl  = document.getElementById('mpesaMsg');
+
+    const finalAmount = parseFloat(amount) || parseFloat(document.getElementById('mpesa_amount')?.value) || parseFloat(btn?.dataset?.amount) || 0;
+    if (!finalAmount) { msgEl.style.color='#dc2626'; msgEl.innerText='Could not determine premium amount.'; return; }
+    amount = finalAmount;
+
+    if (!phone) { msgEl.style.color='#dc2626'; msgEl.innerText='Please enter a phone number.'; return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending prompt...';
+    msgEl.innerText = '';
+
+    try {
+        const res  = await fetch('/api/mpesa/stk', {
+            method:  'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body:    JSON.stringify({ policy_no: policyNo, phone, amount })
+        });
+        const d = await res.json();
+
+        if (!res.ok || !d.success) {
+            msgEl.style.color   = '#dc2626';
+            msgEl.innerText     = d.error || 'M-Pesa prompt failed. Try again.';
+            btn.disabled        = false;
+            btn.innerHTML       = '<i class="fas fa-mobile-alt"></i> Pay via M-Pesa';
+            return;
+        }
+
+        msgEl.style.color = '#15803d';
+        msgEl.innerHTML   = `<i class="fas fa-mobile-alt"></i> ${d.customer_message}<br>
+            <span style="color:#64748b; font-size:12px;">Checking payment status automatically...</span>`;
+
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Waiting for payment...';
+
+        let attempts = 0;
+        const maxAttempts = 12;
+        const poll = setInterval(async () => {
+            attempts++;
+            try {
+                const qres  = await fetch('/api/mpesa/query', {
+                    method:  'POST',
+                    headers: withCsrf({ 'Content-Type': 'application/json' }),
+                    body:    JSON.stringify({ checkout_request_id: d.checkout_request_id, policy_no: policyNo })
+                });
+                const qd = await qres.json();
+
+                if (qd.success) {
+                    clearInterval(poll);
+                    msgEl.style.color = '#15803d';
+                    msgEl.innerHTML   = `<strong><i class="fas fa-check-circle"></i> Payment Confirmed!</strong><br>
+                        <span style="font-size:12px; color:#64748b;">Policy is now active.</span>`;
+                    btn.style.display = 'none';
+                } else if (qd.result_code && qd.result_code !== '0' && attempts >= 2) {
+                    clearInterval(poll);
+                    msgEl.style.color = '#dc2626';
+                    msgEl.innerText   = qd.result_desc || 'Payment was not completed.';
+                    btn.disabled      = false;
+                    btn.innerHTML     = '<i class="fas fa-mobile-alt"></i> Retry M-Pesa';
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(poll);
+                    msgEl.style.color = '#d97706';
+                    msgEl.innerHTML   = 'Could not confirm automatically. <a href="/renewals" style="color:#2563eb;">Check Renewals</a> to verify payment.';
+                    btn.disabled      = false;
+                    btn.innerHTML     = '<i class="fas fa-mobile-alt"></i> Retry M-Pesa';
+                }
+            } catch { /* keep polling */ }
+        }, 5000);
+
+    } catch (err) {
+        msgEl.style.color = '#dc2626';
+        msgEl.innerText   = 'Network error. Please try again.';
+        btn.disabled      = false;
+        btn.innerHTML     = '<i class="fas fa-mobile-alt"></i> Pay via M-Pesa';
+    }
+}
+
+function cap(s) { return (s||'').charAt(0).toUpperCase()+(s||'').slice(1); }
+function fmtEnum(s) { return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+async function logout() { await fetch('/api/logout'); location.href = '/login'; }
+
+loadInsurerCatalog();
+showStep();
+</script>
+<script>
+function openSidebar() {
+    document.querySelector('.sidebar').classList.add('open');
+    document.getElementById('sidebarOverlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        a.addEventListener('click', closeSidebar);
+    });
+});
+</script>
+</body>
+</html>

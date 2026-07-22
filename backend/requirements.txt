@@ -1,0 +1,15 @@
+Flask
+Flask-Cors
+Flask-WTF               # CSRF protection (csrf_token() used in templates)
+pymongo[srv]
+dnspython
+Werkzeug
+requests
+reportlab
+openpyxl
+gunicorn
+python-dotenv
+
+# Added for performance/scalability improvements
+Flask-Limiter          # rate limiting
+redis                  # caching (app runs fine without a Redis server too)

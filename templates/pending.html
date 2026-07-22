@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Account Pending — WESTLAKE INSURANCE</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #f1f5f9;
+}
+
+.card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 16px;
+    padding: 40px 36px;
+    width: 100%;
+    max-width: 440px;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0,0,0,.4);
+}
+
+.icon-wrap {
+    width: 72px; height: 72px;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    margin: 0 auto 20px;
+    box-shadow: 0 8px 20px rgba(245,158,11,.3);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 8px 20px rgba(245,158,11,.3); }
+    50%       { box-shadow: 0 8px 32px rgba(245,158,11,.6); }
+}
+
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 12px; color: #f1f5f9; }
+
+p.sub {
+    font-size: 14px;
+    color: #94a3b8;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #1a1a2e;
+    border: 1px solid #f59e0b;
+    color: #fbbf24;
+    padding: 10px 20px;
+    border-radius: 99px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    margin-bottom: 24px;
+}
+
+.status-dot {
+    width: 8px; height: 8px;
+    background: #f59e0b;
+    border-radius: 50%;
+    animation: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: .2; }
+}
+
+.steps {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    padding: 18px 20px;
+    text-align: left;
+    margin-bottom: 24px;
+}
+
+.steps h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; margin-bottom: 12px; }
+
+.step-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #94a3b8;
+}
+
+.step-item:last-child { margin-bottom: 0; }
+
+.step-num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.step-done  { background: #16a34a; color: #fff; }
+.step-active { background: #f59e0b; color: #000; }
+.step-todo  { background: #1e293b; color: #64748b; border: 1px solid #334155; }
+
+.check-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: .2s;
+    box-shadow: 0 4px 12px rgba(37,99,235,.3);
+    margin-bottom: 12px;
+}
+
+.check-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #1d4ed8, #1e40af);
+}
+
+.check-btn:disabled { opacity: .6; cursor: not-allowed; }
+
+.logout-link {
+    display: block;
+    font-size: 13px;
+    color: #475569;
+    cursor: pointer;
+    margin-top: 4px;
+    text-decoration: none;
+}
+
+.logout-link:hover { color: #94a3b8; }
+
+.msg {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+}
+
+.msg.error   { background: rgba(239,68,68,.15); color: #f87171; border: 1px solid rgba(239,68,68,.3); display: block; }
+.msg.success { background: rgba(34,197,94,.15);  color: #4ade80; border: 1px solid rgba(34,197,94,.3);  display: block; }
+</style>
+</head>
+<body>
+
+<div class="card">
+    <div class="icon-wrap">⏳</div>
+
+    <h1>Account Pending Approval</h1>
+
+    <p class="sub">
+        Your account has been created and is awaiting review by an administrator.
+        You will be notified once your access has been granted.
+    </p>
+
+    <div class="status-pill">
+        <span class="status-dot"></span>
+        STATUS: PENDING REVIEW
+    </div>
+
+    <div class="steps">
+        <h4>What happens next?</h4>
+        <div class="step-item">
+            <div class="step-num step-done"><i class="fas fa-check"></i></div>
+            <span>Account registered successfully</span>
+        </div>
+        <div class="step-item">
+            <div class="step-num step-active">2</div>
+            <span>Admin reviews your application</span>
+        </div>
+        <div class="step-item">
+            <div class="step-num step-todo">3</div>
+            <span>Account approved — you can log in</span>
+        </div>
+    </div>
+
+    <button class="check-btn" id="checkBtn" onclick="checkStatus()">
+        <i class="fas fa-sync-alt"></i> Check Status
+    </button>
+
+    <a class="logout-link" onclick="logout()">
+        <i class="fas fa-sign-out-alt"></i> Back to Login
+    </a>
+
+    <div id="msg" class="msg"></div>
+</div>
+
+<script>
+// NOTE: We do NOT store credentials in sessionStorage (security risk).
+// Status is checked by re-hitting the session-protected /api/dashboard/stats endpoint.
+// If the session is valid and the account is now approved, we get a 200 and redirect.
+
+async function checkStatus() {
+    const btn = document.getElementById('checkBtn');
+    const msg = document.getElementById('msg');
+    msg.className = 'msg';
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking…';
+
+    try {
+        const res = await fetch('/api/dashboard/stats');
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data.role === 'admin' || data.role === 'agent') {
+                msg.className = 'msg success';
+                msg.innerText = 'Account approved! Redirecting to dashboard…';
+                setTimeout(() => { window.location.href = '/dashboard'; }, 1000);
+                return;
+            }
+        }
+
+        // Still pending or rejected
+        const data = await res.json().catch(() => ({}));
+        if (data.error === 'account pending approval') {
+            msg.className = 'msg error';
+            msg.innerText = 'Still pending approval. Please check back later.';
+        } else {
+            msg.className = 'msg error';
+            msg.innerText = 'Still awaiting approval. An admin will review your account soon.';
+        }
+
+    } catch {
+        msg.className = 'msg error';
+        msg.innerText = 'Unable to check status. Please try again.';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync-alt"></i> Check Status';
+    }
+}
+
+async function logout() {
+    await fetch('/api/logout');
+    window.location.href = '/login';
+}
+</script>
+</body>
+</html>

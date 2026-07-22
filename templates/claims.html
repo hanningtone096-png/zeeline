@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>WESTLAKE INSURANCE - Claims Management</title>
+<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+.claims-workspace { display:grid; grid-template-columns:420px 1fr; gap:24px; align-items:start; }
+@media(max-width:960px){ .claims-workspace { grid-template-columns:1fr; } }
+
+.workspace-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:24px; }
+.workspace-card h3 { margin:0 0 18px; font-size:16px; font-weight:600; color:#1e293b; display:flex; align-items:center; gap:8px; }
+
+.form-group { margin-bottom:14px; }
+.form-group label { display:block; margin-bottom:5px; font-weight:600; font-size:13px; color:#475569; }
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width:100%; padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px;
+    box-sizing:border-box; font-size:14px; color:#1e293b; background:#fff; font-family:inherit;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.1);
+}
+
+.submit-btn {
+    width:100%; padding:11px; background:#2563eb; color:#fff; border:none;
+    border-radius:8px; font-size:14px; font-weight:600; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.submit-btn:hover { background:#1d4ed8; }
+.submit-btn:disabled { opacity:.6; cursor:not-allowed; }
+
+.form-msg { font-size:14px; margin:8px 0 12px; padding:10px 14px; border-radius:6px; display:none; }
+.form-msg.success { background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; display:block; }
+.form-msg.error   { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; display:block; }
+
+/* Document upload list */
+.docs-box {
+    border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px;
+    background:#f8fafc; margin-bottom:14px;
+}
+.docs-box legend {
+    font-weight:600; font-size:13px; color:#475569; padding:0 4px;
+}
+.doc-upload-row {
+    display:flex; align-items:center; gap:10px; padding:8px 0;
+    border-bottom:1px solid #e2e8f0;
+}
+.doc-upload-row:last-child { border-bottom:none; }
+
+.doc-upload-info { flex:1; min-width:0; }
+.doc-upload-label { font-size:13px; font-weight:600; color:#334155; }
+.doc-upload-filename {
+    font-size:12px; color:#94a3b8; margin-top:2px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.doc-upload-filename.attached { color:#1d4ed8; font-weight:600; }
+.doc-upload-filename.attached i { margin-right:3px; }
+
+.doc-upload-btn {
+    flex-shrink:0; padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px;
+    background:#fff; color:#475569; font-size:12px; font-weight:600; cursor:pointer;
+    display:flex; align-items:center; gap:5px; transition:.15s;
+}
+.doc-upload-btn:hover { border-color:#93c5fd; background:#eff6ff; color:#1d4ed8; }
+.doc-upload-btn.has-file { border-color:#93c5fd; background:#eff6ff; color:#1d4ed8; }
+
+.doc-remove-btn {
+    flex-shrink:0; width:26px; height:26px; border:none; border-radius:6px;
+    background:#fee2e2; color:#991b1b; font-size:12px; cursor:pointer;
+    display:none; align-items:center; justify-content:center;
+}
+.doc-remove-btn:hover { background:#fecaca; }
+.doc-remove-btn.show { display:flex; }
+
+.doc-upload-row input[type="file"] { display:none; }
+
+.inline-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.checklist-item {
+    display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13px; color:#334155;
+}
+.checklist-item input[type="checkbox"] { width:auto; margin:0; }
+
+/* Status board */
+.filter-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+.filter-btn { padding:6px 14px; border:1px solid #e2e8f0; border-radius:99px; font-size:13px; cursor:pointer; background:#fff; color:#475569; transition:.15s; }
+.filter-btn.active, .filter-btn:hover { background:#2563eb; color:#fff; border-color:#2563eb; }
+
+.status-card-item {
+    border-left:4px solid #e2e8f0; background:#f8fafc; border-radius:8px;
+    padding:14px; margin-bottom:10px; font-size:14px; transition:.15s;
+}
+.status-card-item.pending  { border-left-color:#f59e0b; }
+.status-card-item.approved { border-left-color:#10b981; }
+.status-card-item.rejected { border-left-color:#ef4444; }
+
+.card-meta { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.claim-id   { font-family:monospace; font-size:13px; color:#64748b; }
+
+.badge { display:inline-block; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:600; text-transform:uppercase; }
+.badge-pending  { background:#fef9c3; color:#854d0e; }
+.badge-approved { background:#dcfce7; color:#166534; }
+.badge-rejected { background:#fee2e2; color:#991b1b; }
+
+.doc-pill-row { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.doc-pill {
+    font-size:10.5px; padding:2px 8px; border-radius:99px; font-weight:600;
+    background:#f1f5f9; color:#94a3b8;
+}
+.doc-pill.have { background:#dbeafe; color:#1d4ed8; }
+
+.admin-actions { display:flex; gap:6px; margin-top:10px; }
+.admin-actions button { padding:4px 10px; border:none; border-radius:5px; font-size:12px; font-weight:600; cursor:pointer; }
+.btn-approve { background:#dcfce7; color:#166534; }
+.btn-reject  { background:#fee2e2; color:#991b1b; }
+.btn-approve:hover { background:#bbf7d0; }
+.btn-reject:hover  { background:#fecaca; }
+
+.search-wrap { position:relative; margin-bottom:12px; }
+.search-wrap i { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; }
+.search-bar { width:100%; padding:8px 12px 8px 34px; border:1px solid #cbd5e1; border-radius:8px; font-size:13px; box-sizing:border-box; }
+</style>
+</head>
+<body>
+
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="openSidebar()" aria-label="Open menu">
+        <i class="fas fa-bars"></i>
+    </button>
+    <span class="brand">WESTLAKE</span>
+    <button class="logout-btn" onclick="logout()" aria-label="Logout" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
+        <i class="fas fa-sign-out-alt"></i>
+    </button>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<div class="app-container">
+
+<nav class="sidebar">
+    <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu"><i class="fas fa-times"></i></button></div>
+    <ul class="nav-links">
+        <li><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
+        <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
+        <li class="active"><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
+        <li><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li><a href="/privacy"><i class="fas fa-shield-alt"></i> privacy policy</a></li>
+        <li><a href="/terms"><i class="fas fa-gavel"></i> terms and conditions</a></li>
+    </ul>
+</nav>
+
+<main class="main-content">
+<header class="top-header">
+    <h1>Claims Management Portal</h1>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+</header>
+
+<div class="claims-workspace">
+
+    <section>
+        <div class="workspace-card">
+            <h3><i class="fas fa-plus-circle" style="color:#2563eb;"></i> Lodge New Incident Claim</h3>
+
+            <div id="form_msg" class="form-msg"></div>
+
+            <div class="form-group">
+                <label for="claim_policy">Policy / Registration Number *</label>
+                <input type="text" id="claim_policy" placeholder="e.g. KBC 123X">
+            </div>
+            <div class="form-group">
+                <label for="incident_date">Date and Time of Loss *</label>
+                <input type="datetime-local" id="incident_date">
+            </div>
+            <div class="form-group">
+                <label for="incident_type">Type of Incident *</label>
+                <select id="incident_type">
+                    <option value="">— Select —</option>
+                    <option value="accident">Own Damage / Accident Collision</option>
+                    <option value="theft">Partial or Total Vehicle Theft</option>
+                    <option value="third_party">Third Party Property Damage / Injury</option>
+                    <option value="windscreen">Windscreen / Glass Damage Only</option>
+                    <option value="fire">Fire Damage</option>
+                    <option value="flood">Flood / Natural Disaster</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="incident_desc">Brief Circumstances *</label>
+                <textarea id="incident_desc" rows="4" placeholder="Detail how the incident occurred, location, parties involved…"></textarea>
+            </div>
+
+            <fieldset class="docs-box">
+                <legend>Supporting Documents</legend>
+
+                <div class="doc-upload-row" data-doc="claim_form">
+                    <div class="doc-upload-info">
+                        <div class="doc-upload-label">Completed Claim Form</div>
+                        <div class="doc-upload-filename">No file attached</div>
+                    </div>
+                    <button type="button" class="doc-remove-btn" title="Remove"><i class="fas fa-times"></i></button>
+                    <button type="button" class="doc-upload-btn"><i class="fas fa-paperclip"></i> Attach</button>
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg">
+                </div>
+
+                <div class="doc-upload-row" data-doc="police_abstract">
+                    <div class="doc-upload-info">
+                        <div class="doc-upload-label">Police Abstract</div>
+                        <div class="doc-upload-filename">No file attached</div>
+                    </div>
+                    <button type="button" class="doc-remove-btn" title="Remove"><i class="fas fa-times"></i></button>
+                    <button type="button" class="doc-upload-btn"><i class="fas fa-paperclip"></i> Attach</button>
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg">
+                </div>
+
+                <div class="doc-upload-row" data-doc="inspection_report">
+                    <div class="doc-upload-info">
+                        <div class="doc-upload-label">Vehicle Inspection Report</div>
+                        <div class="doc-upload-filename">No file attached</div>
+                    </div>
+                    <button type="button" class="doc-remove-btn" title="Remove"><i class="fas fa-times"></i></button>
+                    <button type="button" class="doc-upload-btn"><i class="fas fa-paperclip"></i> Attach</button>
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg">
+                </div>
+
+                <div class="doc-upload-row" data-doc="national_id">
+                    <div class="doc-upload-info">
+                        <div class="doc-upload-label">National ID Copy</div>
+                        <div class="doc-upload-filename">No file attached</div>
+                    </div>
+                    <button type="button" class="doc-remove-btn" title="Remove"><i class="fas fa-times"></i></button>
+                    <button type="button" class="doc-upload-btn"><i class="fas fa-paperclip"></i> Attach</button>
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg">
+                </div>
+
+                <div class="doc-upload-row" data-doc="driving_licence">
+                    <div class="doc-upload-info">
+                        <div class="doc-upload-label">Driving Licence Copy</div>
+                        <div class="doc-upload-filename">No file attached</div>
+                    </div>
+                    <button type="button" class="doc-remove-btn" title="Remove"><i class="fas fa-times"></i></button>
+                    <button type="button" class="doc-upload-btn"><i class="fas fa-paperclip"></i> Attach</button>
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg">
+                </div>
+
+                <div class="doc-upload-row" data-doc="logbook">
+                    <div class="doc-upload-info">
+                        <div class="doc-upload-label">Logbook Copy</div>
+                        <div class="doc-upload-filename">No file attached</div>
+                    </div>
+                    <button type="button" class="doc-remove-btn" title="Remove"><i class="fas fa-times"></i></button>
+                    <button type="button" class="doc-upload-btn"><i class="fas fa-paperclip"></i> Attach</button>
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg">
+                </div>
+
+                <div class="doc-upload-row" data-doc="kra_pin">
+                    <div class="doc-upload-info">
+                        <div class="doc-upload-label">KRA PIN Certificate</div>
+                        <div class="doc-upload-filename">No file attached</div>
+                    </div>
+                    <button type="button" class="doc-remove-btn" title="Remove"><i class="fas fa-times"></i></button>
+                    <button type="button" class="doc-upload-btn"><i class="fas fa-paperclip"></i> Attach</button>
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg">
+                </div>
+
+                <label class="checklist-item" style="padding-top:8px; border-top:1px solid #e2e8f0; margin-top:4px;">
+                    <input type="checkbox" id="doc_premium_paid"> Premium Paid in Full
+                </label>
+            </fieldset>
+
+            <div class="inline-fields">
+                <div class="form-group">
+                    <label for="excess_fee">Excess Fee (KES)</label>
+                    <input type="number" id="excess_fee" min="0" step="1" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label for="excess_paid" style="visibility:hidden;">Excess Paid</label>
+                    <label class="checklist-item" style="padding-top:9px;">
+                        <input type="checkbox" id="excess_paid"> Excess Paid by Client
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="checklist-item">
+                    <input type="checkbox" id="liability_acknowledged">
+                    Client acknowledges liability terms &amp; conditions
+                </label>
+            </div>
+
+            <button class="submit-btn" id="submitBtn" onclick="handleClaimSubmission()">
+                Submit to Underwriting <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </section>
+
+    <section>
+        <div class="workspace-card">
+            <h3><i class="fas fa-tasks" style="color:#2563eb;"></i> Claims Status Board</h3>
+
+            <div class="search-wrap">
+                <i class="fas fa-search"></i>
+                <input class="search-bar" id="claimsSearch" placeholder="Search by claim ID or policy…" oninput="filterClaims()">
+            </div>
+
+            <div class="filter-bar">
+                <button class="filter-btn active" data-filter="all"      onclick="setFilter(this,'all')">All</button>
+                <button class="filter-btn"         data-filter="pending"  onclick="setFilter(this,'pending')">Pending</button>
+                <button class="filter-btn"         data-filter="approved" onclick="setFilter(this,'approved')">Approved</button>
+                <button class="filter-btn"         data-filter="rejected" onclick="setFilter(this,'rejected')">Rejected</button>
+            </div>
+
+            <p id="status_msg" style="font-size:13px; color:#94a3b8;"></p>
+            <div id="claimsList">
+                <p style="color:#94a3b8; font-size:14px;">Loading claims…</p>
+            </div>
+        </div>
+    </section>
+
+</div>
+</main>
+</div>
+
+<script>
+let allClaims  = [];
+let activeFilter = 'all';
+let isAdmin    = false;
+
+// Files the agent has attached for this claim, keyed by document type.
+// Populated as they attach/replace/remove files in the "Supporting
+// Documents" section, then sent together in one multipart upload after
+// the claim record itself has been created.
+const attachedDocs = {};
+
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+function withCsrf(headers = {}) {
+    return { ...headers, 'X-CSRFToken': CSRF_TOKEN };
+}
+
+const TYPE_LABELS = {
+    accident:    'Accident Collision',
+    theft:       'Vehicle Theft',
+    third_party: 'Third Party Damage',
+    windscreen:  'Windscreen Damage',
+    fire:        'Fire Damage',
+    flood:       'Flood / Disaster',
+};
+
+const STATUS_META = {
+    pending:  { label:'Under Assessment',  cls:'pending',  badge:'badge-pending'  },
+    approved: { label:'Approved / Settled', cls:'approved', badge:'badge-approved' },
+    rejected: { label:'Declined',           cls:'rejected', badge:'badge-rejected' },
+};
+
+const DOC_LABELS = {
+    claim_form:         'Claim Form',
+    police_abstract:    'Police Abstract',
+    inspection_report:  'Inspection Report',
+    national_id:        'National ID',
+    driving_licence:    'Driving Licence',
+    logbook:             'Logbook',
+    kra_pin:             'KRA PIN',
+    premium_paid:        'Premium Paid',
+};
+
+async function init() {
+    try {
+        const r = await fetch('/api/dashboard/stats');
+        if (r.ok) {
+            const d = await r.json();
+            isAdmin = d.role === 'admin';
+        }
+    } catch (err) {
+        console.error('Failed to load role:', err);
+    }
+    loadClaims();
+    initDocUploadRows();
+}
+
+// ── Per-document file attach/replace/remove ─────────────────────────────────
+function initDocUploadRows() {
+    document.querySelectorAll('.doc-upload-row').forEach(row => {
+        const docType    = row.dataset.doc;
+        const fileInput  = row.querySelector('input[type="file"]');
+        const attachBtn  = row.querySelector('.doc-upload-btn');
+        const removeBtn  = row.querySelector('.doc-remove-btn');
+        const filenameEl = row.querySelector('.doc-upload-filename');
+
+        attachBtn.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files[0];
+            if (!file) return;
+            attachedDocs[docType] = file;
+            filenameEl.textContent = file.name;
+            filenameEl.classList.add('attached');
+            attachBtn.innerHTML = '<i class="fas fa-check"></i> Replace';
+            attachBtn.classList.add('has-file');
+            removeBtn.classList.add('show');
+        });
+
+        removeBtn.addEventListener('click', () => {
+            delete attachedDocs[docType];
+            fileInput.value = '';
+            filenameEl.textContent = 'No file attached';
+            filenameEl.classList.remove('attached');
+            attachBtn.innerHTML = '<i class="fas fa-paperclip"></i> Attach';
+            attachBtn.classList.remove('has-file');
+            removeBtn.classList.remove('show');
+        });
+    });
+}
+
+function resetDocUploadRows() {
+    document.querySelectorAll('.doc-upload-row').forEach(row => {
+        const fileInput  = row.querySelector('input[type="file"]');
+        const attachBtn  = row.querySelector('.doc-upload-btn');
+        const removeBtn  = row.querySelector('.doc-remove-btn');
+        const filenameEl = row.querySelector('.doc-upload-filename');
+        fileInput.value = '';
+        filenameEl.textContent = 'No file attached';
+        filenameEl.classList.remove('attached');
+        attachBtn.innerHTML = '<i class="fas fa-paperclip"></i> Attach';
+        attachBtn.classList.remove('has-file');
+        removeBtn.classList.remove('show');
+    });
+    for (const key in attachedDocs) delete attachedDocs[key];
+}
+
+async function handleClaimSubmission() {
+    const msg = document.getElementById('form_msg');
+    const btn = document.getElementById('submitBtn');
+    msg.className = 'form-msg';
+
+    // A document "is on file" for the claim record's boolean columns if
+    // the agent actually attached a file for it in this submission.
+    const payload = {
+        claim_policy:  document.getElementById('claim_policy').value.trim(),
+        incident_date: document.getElementById('incident_date').value,
+        incident_type: document.getElementById('incident_type').value,
+        incident_desc: document.getElementById('incident_desc').value.trim(),
+
+        claim_form:         !!attachedDocs.claim_form,
+        police_abstract:    !!attachedDocs.police_abstract,
+        inspection_report:  !!attachedDocs.inspection_report,
+        national_id:        !!attachedDocs.national_id,
+        driving_licence:    !!attachedDocs.driving_licence,
+        logbook:             !!attachedDocs.logbook,
+        kra_pin:             !!attachedDocs.kra_pin,
+        premium_paid:        document.getElementById('doc_premium_paid').checked,
+
+        excess_fee:              parseFloat(document.getElementById('excess_fee').value) || 0,
+        excess_paid:              document.getElementById('excess_paid').checked,
+        liability_acknowledged:   document.getElementById('liability_acknowledged').checked,
+    };
+
+    if (!payload.claim_policy) return showMsg('error', 'Policy / registration number is required.');
+    if (!payload.incident_date) return showMsg('error', 'Date and time of loss is required.');
+    if (!payload.incident_type) return showMsg('error', 'Please select an incident type.');
+    if (!payload.incident_desc) return showMsg('error', 'Please describe the incident.');
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting…';
+
+    try {
+        const res  = await fetch('/api/claims', {
+            method:  'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body:    JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            showMsg('error', data.error || 'Failed to submit claim.');
+            return;
+        }
+
+        const claimId = data.claim_id || (data.claim && data.claim.id);
+        const docEntries = Object.entries(attachedDocs);
+
+        if (claimId && docEntries.length > 0) {
+            const formData = new FormData();
+            formData.append('claim_id', claimId);
+            docEntries.forEach(([docType, file]) => {
+                // Backend currently stores all claim evidence under a single
+                // doc_type — keep the document type in the filename so it's
+                // identifiable in the documents table / uploads folder until
+                // the upload endpoint accepts a per-file doc_type.
+                const renamed = new File([file], `${docType}__${file.name}`, { type: file.type });
+                formData.append('file', renamed);
+            });
+            try {
+                const uploadRes = await fetch('/api/upload', {
+                    method:  'POST',
+                    headers: withCsrf(),
+                    body:    formData
+                });
+                if (!uploadRes.ok) {
+                    showMsg('error', 'Claim was recorded, but one or more documents failed to upload. Please re-attach and retry from the claim record.');
+                }
+            } catch (uploadErr) {
+                console.error('Document upload failed:', uploadErr);
+                showMsg('error', 'Claim was recorded, but documents failed to upload due to a network error.');
+            }
+        }
+
+        if (msg.className === 'form-msg') {
+            showMsg('success', 'Claim reference recorded successfully.');
+        }
+
+        // Reset form
+        document.getElementById('claim_policy').value  = '';
+        document.getElementById('incident_date').value = '';
+        document.getElementById('incident_type').value = '';
+        document.getElementById('incident_desc').value = '';
+        ['doc_premium_paid','excess_paid','liability_acknowledged'].forEach(id => {
+            document.getElementById(id).checked = false;
+        });
+        document.getElementById('excess_fee').value = '';
+        resetDocUploadRows();
+        loadClaims();
+
+    } catch {
+        showMsg('error', 'Network error — please try again.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Submit to Underwriting <i class="fas fa-paper-plane"></i>';
+    }
+}
+
+function showMsg(type, text) {
+    const el = document.getElementById('form_msg');
+    el.className = `form-msg ${type}`;
+    el.innerText = text;
+}
+
+async function loadClaims() {
+    try {
+        const res  = await fetch('/api/claims');
+        const data = await res.json();
+
+        if (!res.ok) {
+            document.getElementById('claimsList').innerHTML =
+                `<p style="color:#ef4444;">Could not load claims.</p>`;
+            return;
+        }
+
+        // Safely extract array whether it's wrapped or returned as raw list
+        allClaims = Array.isArray(data) ? data : (data.claims || []);
+        allClaims = allClaims.slice().reverse();
+        renderClaims();
+    } catch {
+        document.getElementById('claimsList').innerHTML =
+            '<p style="color:#ef4444;">Network error — could not load claims.</p>';
+    }
+}
+
+function setFilter(btn, filter) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = filter;
+    renderClaims();
+}
+
+function filterClaims() { renderClaims(); }
+
+function renderClaims() {
+    const q       = document.getElementById('claimsSearch').value.toLowerCase();
+    const list    = document.getElementById('claimsList');
+    const msgEl   = document.getElementById('status_msg');
+
+    let claims = allClaims;
+
+    if (activeFilter !== 'all') {
+        claims = claims.filter(c => c.status === activeFilter);
+    }
+    if (q) {
+        claims = claims.filter(c =>
+            String(c.id || '').toLowerCase().includes(q) ||
+            String(c.claim_policy || '').toLowerCase().includes(q)
+        );
+    }
+
+    msgEl.innerText = `${claims.length} claim(s)`;
+
+    if (claims.length === 0) {
+        list.innerHTML = '<p style="color:#94a3b8; font-size:14px;">No claims found.</p>';
+        return;
+    }
+
+    list.innerHTML = claims.map(c => {
+        const meta      = STATUS_META[c.status] || STATUS_META.pending;
+        const typeLabel = TYPE_LABELS[c.incident_type] || c.incident_type;
+        const dateStr   = c.incident_date
+            ? new Date(c.incident_date).toLocaleDateString('en-KE',
+                { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+            : '—';
+        const desc      = (c.incident_desc || '').substring(0, 130);
+        const ellipsis  = (c.incident_desc || '').length > 130 ? '…' : '';
+
+        const docPills = Object.keys(DOC_LABELS).map(key => {
+            const have = !!c[key];
+            return `<span class="doc-pill ${have ? 'have' : ''}">${have ? '✓' : '·'} ${DOC_LABELS[key]}</span>`;
+        }).join('');
+
+        const excessLine = (c.excess_fee || c.excess_paid)
+            ? `<p style="font-size:12px; color:#94a3b8; margin:4px 0 0;">
+                   Excess: KES ${Number(c.excess_fee || 0).toLocaleString()}
+                   ${c.excess_paid ? '<span style="color:#10b981;font-weight:600;"> · Paid</span>' : '<span style="color:#f59e0b;font-weight:600;"> · Unpaid</span>'}
+               </p>` : '';
+
+        const adminBtns = isAdmin ? `
+            <div class="admin-actions">
+                <button class="btn-approve" onclick="updateClaimStatus('${esc(c.id)}','approved')">
+                    <i class="fas fa-check"></i> Approve
+                </button>
+                <button class="btn-reject" onclick="updateClaimStatus('${esc(c.id)}','rejected')">
+                    <i class="fas fa-times"></i> Reject
+                </button>
+            </div>` : '';
+
+        const agentLine = isAdmin && c.agent_name
+            ? `<p style="font-size:12px; color:#94a3b8; margin:4px 0 0;">Agent: ${esc(c.agent_name)}</p>`
+            : '';
+
+        return `
+        <div class="status-card-item ${meta.cls}" id="claim-${esc(c.id)}">
+            <div class="card-meta">
+                <span class="claim-id">#${esc(c.id)}</span>
+                <span class="badge ${meta.badge}" id="badge-${esc(c.id)}">${meta.label}</span>
+            </div>
+            <h4 style="margin:0 0 4px; font-size:14px;">
+                <strong>${esc(c.claim_policy)}</strong> — ${esc(typeLabel)}
+            </h4>
+            <p style="margin:0; color:#475569; font-size:13px;">${esc(desc)}${ellipsis}</p>
+            <p style="font-size:12px; color:#94a3b8; margin:6px 0 0;">
+                <i class="fas fa-calendar-alt"></i> ${dateStr}
+            </p>
+            ${excessLine}
+            <div class="doc-pill-row">${docPills}</div>
+            ${agentLine}
+            ${adminBtns}
+        </div>`;
+    }).join('');
+}
+
+async function updateClaimStatus(claimId, status) {
+    try {
+        const res = await fetch(`/api/claims/${claimId}/status`, {
+            method:  'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body:    JSON.stringify({ status })
+        });
+
+        if (res.ok) {
+            const meta  = STATUS_META[status] || STATUS_META.pending;
+            const card  = document.getElementById(`claim-${claimId}`);
+            const badge = document.getElementById(`badge-${claimId}`);
+            if (card)  { card.className  = `status-card-item ${meta.cls}`; }
+            if (badge) { badge.className = `badge ${meta.badge}`; badge.innerText = meta.label; }
+        } else {
+            alert('Failed to update claim status.');
+        }
+    } catch (err) {
+        console.error('Error updating claim status:', err);
+        alert('Server communication error. Please try again.');
+    }
+}
+
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function logout() { await fetch('/api/logout'); window.location.href = '/login'; }
+
+init();
+</script>
+<script>
+// ── Mobile Sidebar ───────────────────────────────────────────
+function openSidebar() {
+    document.querySelector('.sidebar').classList.add('open');
+    document.getElementById('sidebarOverlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        a.addEventListener('click', closeSidebar);
+    });
+});
+</script>
+</body>
+</html>

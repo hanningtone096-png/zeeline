@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WESTLAKE INSURANCE - Client Portfolio</title>
+<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+.page-grid { display:grid; grid-template-columns:380px 1fr; gap:24px; align-items:start; }
+@media(max-width:900px){ .page-grid { grid-template-columns:1fr; } }
+
+.form-card, .list-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:24px; }
+.form-card h3, .list-card h3 { margin:0 0 18px; font-size:16px; font-weight:600; color:#1e293b; display:flex; align-items:center; gap:8px; }
+
+.form-group { margin-bottom:14px; }
+.form-group label { display:block; margin-bottom:5px; font-weight:600; font-size:13px; color:#475569; }
+.form-group input { width:100%; padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; font-size:14px; color:#1e293b; }
+.form-group input:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.1); }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+.add-btn { width:100%; padding:10px; background:#2563eb; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
+.add-btn:hover { background:#1d4ed8; }
+
+.search-bar { width:100%; padding:9px 12px 9px 36px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; box-sizing:border-box; }
+.search-wrap { position:relative; margin-bottom:16px; }
+.search-wrap i { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; }
+
+.client-table { width:100%; border-collapse:collapse; font-size:14px; }
+.client-table th { padding:10px 12px; background:#f8fafc; color:#475569; font-weight:600; text-align:left; border-bottom:1px solid #e2e8f0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+.client-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; color:#1e293b; vertical-align:middle; }
+.client-table tr:last-child td { border-bottom:none; }
+.client-table tr:hover td { background:#f8fafc; }
+
+.plate-badge { background:#1e293b; color:#fff; padding:3px 10px; border-radius:4px; font-size:12px; font-family:monospace; font-weight:600; letter-spacing:.05em; }
+.pin-sub { font-size:12px; color:#94a3b8; }
+.phone-sub { font-size:12px; color:#64748b; display:block; }
+.avatar-icon { width:32px; height:32px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; color:#2563eb; font-size:14px; margin-right:8px; vertical-align:middle; }
+
+.action-btn { border:none; padding:5px 8px; border-radius:5px; cursor:pointer; font-size:12px; }
+.btn-view  { background:#eff6ff; color:#2563eb; }
+.btn-call  { background:#f0fdf4; color:#16a34a; }
+.btn-wa    { background:#dcfce7; color:#15803d; }
+.action-btn:hover { opacity:.8; }
+
+.form-msg { font-size:14px; margin:8px 0; padding:8px 12px; border-radius:6px; display:none; }
+.form-msg.success { background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; display:block; }
+.form-msg.error   { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; display:block; }
+
+/* Modal */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; align-items:center; justify-content:center; }
+.modal-overlay.open { display:flex; }
+.modal-box { background:#fff; border-radius:12px; padding:28px; width:480px; max-width:95%; max-height:90vh; overflow-y:auto; }
+.modal-box h3 { margin:0 0 16px; font-size:16px; color:#1e293b; }
+.modal-close { float:right; background:none; border:none; font-size:20px; cursor:pointer; color:#64748b; }
+.policy-row { border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:10px; font-size:13px; }
+.policy-row strong { color:#1e293b; }
+.expiry-green  { color:#16a34a; font-weight:600; }
+.expiry-orange { color:#d97706; font-weight:600; }
+.expiry-red    { color:#dc2626; font-weight:600; }
+.expiry-expired { color:#6b7280; font-weight:600; }
+</style>
+</head>
+<body>
+
+<!-- ── Mobile top bar ── -->
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="openSidebar()">
+        <i class="fas fa-bars"></i>
+    </button>
+    <span class="brand">WESTLAKE</span>
+    <button class="logout-btn" onclick="logout()" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
+        <i class="fas fa-sign-out-alt"></i>
+    </button>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<div class="app-container">
+
+<aside class="sidebar">
+    <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()"><i class="fas fa-times"></i></button></div>
+    <ul class="nav-links">
+        <li><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
+        <li class="active"><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
+        <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
+        <li><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li><a href="/privacy"><i class="fas fa-shield-alt"></i> privacy policy</a></li>
+        <li><a href="/terms"><i class="fas fa-gavel"></i> terms and conditions</a></li>
+    </ul>
+</aside>
+
+<main class="main-content">
+<div class="top-header">
+    <h1>Client Portfolio</h1>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+</div>
+
+<div class="page-grid">
+
+    <!-- Add Client Form -->
+    <div class="form-card">
+        <h3><i class="fas fa-user-plus" style="color:#2563eb;"></i> Add New Client</h3>
+
+        <div class="grid-2">
+            <div class="form-group"><label>First Name *</label><input id="first_name" placeholder="First Name"></div>
+            <div class="form-group"><label>Last Name *</label><input id="last_name" placeholder="Last Name"></div>
+        </div>
+        <div class="form-group"><label>Phone *</label><input id="phone" placeholder="07XXXXXXXX"></div>
+        <div class="form-group"><label>Email</label><input id="email" type="email" placeholder="email@example.com"></div>
+        <div class="grid-2">
+            <div class="form-group"><label>National ID</label><input id="id_number" placeholder="ID Number"></div>
+            <div class="form-group"><label>KRA PIN</label><input id="kra_pin" placeholder="KRA PIN" style="text-transform:uppercase;"></div>
+        </div>
+        <div class="form-group"><label>Vehicle Registration</label><input id="vehicle_reg" placeholder="e.g. KBC 123X" style="text-transform:uppercase;"></div>
+
+        <div id="form_msg" class="form-msg"></div>
+
+        <button class="add-btn" onclick="addClient()">
+            <i class="fas fa-plus"></i> Add Client
+        </button>
+    </div>
+
+    <!-- Client List -->
+    <div class="list-card">
+        <h3><i class="fas fa-users" style="color:#2563eb;"></i> Client Portfolio <span id="clientCount" style="font-size:13px; color:#94a3b8; font-weight:400;"></span></h3>
+
+        <div class="search-wrap">
+            <i class="fas fa-search"></i>
+            <input class="search-bar" id="search_input" placeholder="Search by name, phone or plate…" oninput="filterTable()">
+        </div>
+
+        <p id="table_msg" style="font-size:14px; color:#94a3b8;"></p>
+
+        <div style="overflow-x:auto;">
+            <table class="client-table">
+                <thead>
+                    <tr>
+                        <th>Client</th>
+                        <th>Vehicle Reg</th>
+                        <th>ID / KRA PIN</th>
+                        <th id="agentColHead" style="display:none;">Agent</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="clientTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+</main>
+</div>
+
+<!-- Client Detail Modal -->
+<div class="modal-overlay" id="clientModal">
+    <div class="modal-box">
+        <button class="modal-close" onclick="closeModal()">×</button>
+        <h3 id="modalTitle">Client Details</h3>
+        <div id="modalBody"></div>
+    </div>
+</div>
+
+<script>
+let allClients = [];
+let isAdmin    = false;
+
+async function init() {
+    // Check role
+    const statsRes = await fetch('/api/dashboard/stats');
+    if (statsRes.ok) {
+        const stats = await statsRes.json();
+        isAdmin = stats.role === 'admin';
+        if (isAdmin) {
+            document.getElementById('agentColHead').style.display = '';
+        }
+    }
+    loadClients();
+}
+
+async function addClient() {
+    const msg = document.getElementById('form_msg');
+    msg.className = 'form-msg';
+
+    const firstName  = document.getElementById('first_name').value.trim();
+    const lastName   = document.getElementById('last_name').value.trim();
+    const phone      = document.getElementById('phone').value.trim();
+
+    if (!firstName || !lastName || !phone) {
+        msg.className = 'form-msg error';
+        msg.innerText = 'First name, last name and phone are required.';
+        return;
+    }
+
+    const res = await fetch('/api/clients/add', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            first_name:  firstName,
+            last_name:   lastName,
+            phone,
+            id_number:   document.getElementById('id_number').value.trim(),
+            kra_pin:     document.getElementById('kra_pin').value.trim().toUpperCase(),
+            vehicle_reg: document.getElementById('vehicle_reg').value.trim().toUpperCase(),
+            email:       document.getElementById('email').value.trim(),
+        })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+        msg.className = 'form-msg error';
+        msg.innerText = data.error || 'Failed to add client.';
+        return;
+    }
+
+    msg.className = 'form-msg success';
+    msg.innerText = 'Client added successfully!';
+    ['first_name','last_name','phone','id_number','kra_pin','vehicle_reg','email']
+        .forEach(id => document.getElementById(id).value = '');
+    loadClients();
+
+    setTimeout(() => { msg.className = 'form-msg'; }, 3000);
+}
+
+async function loadClients() {
+    const tbody  = document.getElementById('clientTableBody');
+    const msgEl  = document.getElementById('table_msg');
+
+    try {
+        const res  = await fetch('/api/clients/list');
+        const data = await res.json();
+
+        if (!res.ok) { msgEl.innerText = data.error || 'Could not load clients.'; return; }
+
+        allClients = data.clients || [];
+        renderTable(allClients);
+    } catch {
+        msgEl.innerText = 'Network error — could not load clients.';
+    }
+}
+
+function renderTable(clients) {
+    const tbody    = document.getElementById('clientTableBody');
+    const tableMsg = document.getElementById('table_msg');
+    const countEl  = document.getElementById('clientCount');
+
+    countEl.innerText = `(${clients.length})`;
+
+    if (clients.length === 0) {
+        tbody.innerHTML = '';
+        tableMsg.innerText = 'No clients found.';
+        return;
+    }
+
+    tableMsg.innerText = '';
+
+    tbody.innerHTML = clients.map(c => `
+        <tr>
+            <td>
+                <span class="avatar-icon"><i class="fas fa-user"></i></span>
+                <strong>${esc(c.first_name)} ${esc(c.last_name)}</strong>
+                <span class="phone-sub">${esc(c.phone)}</span>
+            </td>
+            <td>
+                ${c.vehicle_reg
+                    ? `<span class="plate-badge">${esc(c.vehicle_reg.toUpperCase())}</span>`
+                    : '<span style="color:#cbd5e1;">—</span>'}
+            </td>
+            <td>
+                <span>${esc(c.id_number || '—')}</span><br>
+                <span class="pin-sub">${esc(c.kra_pin || '—')}</span>
+            </td>
+            ${isAdmin ? `<td style="font-size:13px; color:#64748b;">${esc(c.agent_name || '—')}</td>` : ''}
+            <td style="display:flex; gap:4px;">
+                <button class="action-btn btn-view" title="View details" onclick="viewClient(${c.id})">
+                    <i class="fas fa-eye"></i>
+                </button>
+                <button class="action-btn btn-call" title="Call" onclick="window.location.href='tel:${esc(c.phone)}'">
+                    <i class="fas fa-phone"></i>
+                </button>
+                <button class="action-btn btn-wa" title="WhatsApp" onclick="openWhatsApp('${esc(c.phone)}','${esc(c.first_name)}')">
+                    <i class="fab fa-whatsapp"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function filterTable() {
+    const q = document.getElementById('search_input').value.toLowerCase();
+    const filtered = allClients.filter(c =>
+        `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) ||
+        (c.vehicle_reg || '').toLowerCase().includes(q) ||
+        (c.phone       || '').includes(q) ||
+        (c.kra_pin     || '').toLowerCase().includes(q)
+    );
+    renderTable(filtered);
+}
+
+async function viewClient(id) {
+    const c = allClients.find(x => x.id === id);
+    if (!c) return;
+
+    document.getElementById('modalTitle').innerText =
+        `${c.first_name} ${c.last_name}`;
+
+    // Load policies for this client's vehicle
+    let policyHtml = '<p style="color:#94a3b8; font-size:13px;">Loading policies…</p>';
+
+    document.getElementById('modalBody').innerHTML = `
+        <table style="width:100%; font-size:14px; border-collapse:collapse; margin-bottom:16px;">
+            <tr><td style="padding:6px 0; color:#64748b; width:120px;">Phone</td><td><strong>${esc(c.phone)}</strong></td></tr>
+            <tr><td style="padding:6px 0; color:#64748b;">Email</td><td>${esc(c.email || '—')}</td></tr>
+            <tr><td style="padding:6px 0; color:#64748b;">National ID</td><td>${esc(c.id_number || '—')}</td></tr>
+            <tr><td style="padding:6px 0; color:#64748b;">KRA PIN</td><td>${esc(c.kra_pin || '—')}</td></tr>
+            <tr><td style="padding:6px 0; color:#64748b;">Vehicle</td><td>
+                ${c.vehicle_reg ? `<span class="plate-badge">${esc(c.vehicle_reg.toUpperCase())}</span>` : '—'}
+            </td></tr>
+            ${isAdmin ? `<tr><td style="padding:6px 0; color:#64748b;">Agent</td><td>${esc(c.agent_name||'—')}</td></tr>` : ''}
+        </table>
+        <h4 style="margin:0 0 10px; font-size:14px; color:#1e293b;">Policies</h4>
+        <div id="modalPolicies">${policyHtml}</div>
+    `;
+
+    document.getElementById('clientModal').classList.add('open');
+
+    // Load policies
+    try {
+        const res  = await fetch('/api/policies/list');
+        const data = await res.json();
+        const policies = (data.policies || []).filter(p =>
+            p.vehicle_reg === c.vehicle_reg || p.client_id === c.id
+        );
+
+        if (policies.length === 0) {
+            document.getElementById('modalPolicies').innerHTML =
+                '<p style="color:#94a3b8; font-size:13px;">No policies found for this client.</p>';
+            return;
+        }
+
+        document.getElementById('modalPolicies').innerHTML = policies.map(p => {
+            const days = parseInt(p.days_remaining);
+            let cls = 'expiry-green', lbl = `${days} days left`;
+            if (isNaN(days)||days<0) { cls='expiry-expired'; lbl='Expired'; }
+            else if (days<=7)        { cls='expiry-red'; }
+            else if (days<=30)       { cls='expiry-orange'; }
+
+            return `
+            <div class="policy-row">
+                <strong style="font-family:monospace;">${esc(p.policy_no)}</strong>
+                <span class="${cls}" style="float:right;">${lbl}</span><br>
+                <span style="color:#64748b;">${esc((p.type_of_cover||'').replace(/_/g,' '))}</span>
+                &nbsp;|&nbsp; ${esc(p.vehicle_reg||'—')}<br>
+                <span style="font-size:12px; color:#94a3b8;">
+                    ${p.commencing_date||'—'} → ${p.expiry_date||'—'}
+                    &nbsp;&nbsp; KES ${Number(p.total_payable||0).toLocaleString()}
+                </span>
+            </div>`;
+        }).join('');
+    } catch {
+        document.getElementById('modalPolicies').innerHTML =
+            '<p style="color:#ef4444; font-size:13px;">Could not load policies.</p>';
+    }
+}
+
+function closeModal() {
+    document.getElementById('clientModal').classList.remove('open');
+}
+
+function openWhatsApp(phone, name) {
+    const clean = phone.replace(/\D/g,'');
+    const intl  = clean.startsWith('0') ? '254'+clean.slice(1) : clean;
+    const msg   = encodeURIComponent(`Hello ${name}, this is Westlake Insurance reaching out regarding your policy.`);
+    window.open(`https://wa.me/${intl}?text=${msg}`, '_blank');
+}
+
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function logout() { await fetch('/api/logout'); window.location.href = '/login'; }
+
+// Close modal on overlay click
+document.getElementById('clientModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+init();
+</script>
+<script>
+// ── Mobile Sidebar ───────────────────────────────────────────
+function openSidebar() {
+    document.querySelector('.sidebar').classList.add('open');
+    document.getElementById('sidebarOverlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        a.addEventListener('click', closeSidebar);
+    });
+});
+</script>
+</body>
+</html>

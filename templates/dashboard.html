@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>WESTLAKE INSURANCE - Dashboard</title>
+<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<!-- ── Mobile top bar ── -->
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="openSidebar()" aria-label="Open menu">
+        <i class="fas fa-bars"></i>
+    </button>
+    <span class="brand">WESTLAKE</span>
+    <button class="logout-btn" onclick="logout()" aria-label="Logout" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
+        <i class="fas fa-sign-out-alt"></i>
+    </button>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<div class="app-container">
+
+<aside class="sidebar">
+    <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu"><i class="fas fa-times"></i></button></div>
+    <ul class="nav-links">
+        <li class="active"><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
+        <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
+        <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
+        <li><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li><a href="/privacy"><i class="fas fa-shield-alt"></i> privacy policy</a></li>
+        <li><a href="/terms"><i class="fas fa-gavel"></i> terms and conditions</a></li>
+    </ul>
+</aside>
+
+<main class="main-content">
+
+    <div class="top-header">
+        <h2>Welcome, <span id="welcome">—</span> <span id="roleTag" style="font-size:12px; background:#eff6ff; color:#2563eb; padding:3px 10px; border-radius:99px; font-weight:600; vertical-align:middle;"></span></h2>
+        <button onclick="logout()" class="logout-btn">Logout</button>
+    </div>
+
+    <!-- Double Insurance Check -->
+    <div class="section-card">
+        <h3><i class="fas fa-search" style="color:#2563eb;"></i> Check for Double Insurance</h3>
+        <p style="font-size:13px;color:#64748b;margin-top:-6px;">
+            Search by vehicle registration or chassis number to see if it already has an active policy,
+            before submitting a new quote — the same check DMVIC runs at issuance (their "ER005" error).
+        </p>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <input type="text" id="doubleInsuranceQuery" placeholder="e.g. KAA 123A or chassis number"
+                   style="flex:1; min-width:220px; padding:10px 14px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px;"
+                   onkeydown="if(event.key==='Enter') checkDoubleInsurance();">
+            <button onclick="checkDoubleInsurance()" style="padding:10px 20px; background:#2563eb; color:#fff; border:none; border-radius:8px; cursor:pointer; font-weight:600;">
+                <i class="fas fa-search"></i> Check
+            </button>
+        </div>
+        <div id="doubleInsuranceResults" style="margin-top:14px;"></div>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <!-- Chart -->
+    <div class="section-card">
+        <h3><i class="fas fa-chart-bar" style="color:#2563eb;"></i> Performance Overview</h3>
+        <canvas id="mainChart" height="90"></canvas>
+    </div>
+
+    <!-- ── ADMIN ONLY PANELS ── -->
+    <div id="adminSection" style="display:none;">
+
+        <!-- Reports -->
+        <div class="section-card">
+            <h3><i class="fas fa-file-download" style="color:#2563eb;"></i> Reports</h3>
+            <div class="report-bar">
+                <select id="reportPeriod">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly" selected>Monthly</option>
+                    <option value="yearly">Yearly</option>
+                </select>
+                <button onclick="downloadReport('pdf')">
+                    <i class="fas fa-file-pdf"></i> Download PDF
+                </button>
+                <button onclick="downloadReport('excel')" class="excel">
+                    <i class="fas fa-file-excel"></i> Download Excel
+                </button>
+            </div>
+            <div id="reportSummary" style="margin-top:16px;"></div>
+        </div>
+
+        <!-- Agent Management -->
+        <div class="section-card">
+            <h3><i class="fas fa-users-cog" style="color:#2563eb;"></i> Agent Management</h3>
+            <div style="overflow-x:auto;">
+                <table class="agent-table" id="agentsTable">
+                    <thead>
+                        <tr>
+                            <th scope="col">Agent</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Flag</th>
+                            <th scope="col">Quotes</th>
+                            <th scope="col">Policies</th>
+                            <th scope="col">Premium (KES)</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agentsBody">
+                        <tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:20px;">Loading agents…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Certificate Declarations -->
+        <div class="section-card">
+            <h3><i class="fas fa-stamp" style="color:#2563eb;"></i> Certificate Declarations</h3>
+            <p style="font-size:13px;color:#64748b;margin-top:-6px;">
+                DMVIC-issued certificates awaiting declaration to each insurer. Select the
+                certificates for one insurer, paste the M-Pesa confirmation for the
+                declaration payment, then send.
+            </p>
+            <div id="declarationsGroups">
+                <p style="color:#94a3b8;font-size:13px;">Loading pending certificates…</p>
+            </div>
+
+            <h4 style="margin-top:22px;font-size:14px;color:#1e293b;">Past Declarations</h4>
+            <div style="overflow-x:auto;">
+                <table class="agent-table" id="declarationsHistoryTable">
+                    <thead>
+                        <tr>
+                            <th scope="col">Sent</th>
+                            <th scope="col">Insurer</th>
+                            <th scope="col">Certs</th>
+                            <th scope="col">Premium (KES)</th>
+                            <th scope="col">Sent To</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">File</th>
+                        </tr>
+                    </thead>
+                    <tbody id="declarationsHistoryBody">
+                        <tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:16px;">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ── AGENT: My Policies ── -->
+    <div id="agentSection" style="display:none;">
+        <div class="section-card">
+            <h3><i class="fas fa-shield-alt" style="color:#2563eb;"></i> My Active Policies</h3>
+            <div style="overflow-x:auto;">
+                <table class="agent-table" id="policiesTable">
+                    <thead>
+                        <tr>
+                            <th scope="col">Policy No</th>
+                            <th scope="col">Client</th>
+                            <th scope="col">Vehicle</th>
+                            <th scope="col">Cover</th>
+                            <th scope="col">Expiry</th>
+                            <th scope="col">Days Left</th>
+                            <th scope="col">Premium</th>
+                        </tr>
+                    </thead>
+                    <tbody id="policiesBody">
+                        <tr><td colspan="7" style="text-align:center; color:#94a3b8; padding:20px;">Loading policies…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</main>
+</div>
+
+<!-- Certificate Declaration send modal -->
+<div id="declarationModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:12px;max-width:520px;width:92%;padding:22px;">
+        <h3 style="margin-top:0;">Send Declaration — <span id="declModalCompany"></span></h3>
+        <p style="font-size:13px;color:#64748b;">
+            <span id="declModalCount">0</span> certificate(s) selected ·
+            Total premium: KES <span id="declModalTotal">0</span>
+        </p>
+        <label style="font-size:13px;font-weight:600;color:#334155;">Paste the M-Pesa confirmation message</label>
+        <textarea id="declModalMpesa" rows="4" placeholder="e.g. UG2LO9QVCP Confirmed. Ksh2,100.00 sent to Ecobank Ltd for account 427555#westlake on 2/7/26 at 10:01 AM"
+            style="width:100%;margin-top:6px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;box-sizing:border-box;"></textarea>
+        <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+            <button onclick="closeDeclarationModal()" style="padding:10px 18px;background:#f1f5f9;border:none;border-radius:8px;cursor:pointer;">Cancel</button>
+            <button onclick="confirmSendDeclaration()" style="padding:10px 18px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">
+                <i class="fas fa-paper-plane"></i> Send
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+let chartInstance = null;
+
+// CSRF token, read once from the meta tag rendered by Flask-WTF.
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+function withCsrf(headers = {}) {
+    return { ...headers, 'X-CSRFToken': CSRF_TOKEN };
+}
+
+async function loadDashboard() {
+    try {
+        const res = await fetch('/api/dashboard/stats');
+        if (!res.ok) { window.location.href = '/login'; return; }
+        const d = await res.json();
+
+        document.getElementById('welcome').innerText  = d.name || 'User';
+        document.getElementById('roleTag').innerText  = (d.role || '').toUpperCase();
+
+        if (d.role === 'admin') {
+            renderAdminStats(d);
+            document.getElementById('adminSection').style.display = 'block';
+            loadAgents();
+            loadReportSummary();
+            loadDeclarations();
+        } else {
+            renderAgentStats(d);
+            document.getElementById('agentSection').style.display = 'block';
+            loadPolicies();
+        }
+    } catch (err) {
+        console.error('Failed to load dashboard:', err);
+    }
+}
+
+function renderAdminStats(d) {
+    const items = [
+        { icon:'fas fa-users',         color:'#3b82f6', bg:'#eff6ff', label:'Total Clients',   value: d.total_clients   },
+        { icon:'fas fa-user-tie',      color:'#8b5cf6', bg:'#f5f3ff', label:'Agents',           value: d.total_agents    },
+        { icon:'fas fa-file-invoice',  color:'#10b981', bg:'#f0fdf4', label:'Quotations',        value: d.total_quotes    },
+        { icon:'fas fa-shield-alt',    color:'#f59e0b', bg:'#fffbeb', label:'Active Policies',   value: d.active_policies },
+        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:'Total Premium',     value: 'KES ' + Number(d.total_premium).toLocaleString() },
+    ];
+    renderStatCards(items);
+    renderChart(
+        ['Clients', 'Agents', 'Quotations', 'Policies'],
+        [d.total_clients, d.total_agents, d.total_quotes, d.active_policies]
+    );
+}
+
+function renderAgentStats(d) {
+    const items = [
+        { icon:'fas fa-users',        color:'#3b82f6', bg:'#eff6ff', label:'My Clients',  value: d.my_clients  },
+        { icon:'fas fa-file-invoice', color:'#10b981', bg:'#f0fdf4', label:'Quotations',   value: d.my_quotes   },
+        { icon:'fas fa-shield-alt',   color:'#f59e0b', bg:'#fffbeb', label:'Active Policies', value: d.my_active },
+        { icon:'fas fa-coins',        color:'#8b5cf6', bg:'#f5f3ff', label:'My Premium',   value: 'KES ' + Number(d.my_premium).toLocaleString() },
+    ];
+    renderStatCards(items);
+    renderChart(
+        ['Clients', 'Quotes', 'Active Policies'],
+        [d.my_clients, d.my_quotes, d.my_active]
+    );
+}
+
+function renderStatCards(items) {
+    document.getElementById('statsGrid').innerHTML = items.map(it => `
+        <div class="stat-card">
+            <div class="icon" style="background:${it.bg}; color:${it.color};">
+                <i class="${it.icon}"></i>
+            </div>
+            <div class="value">${it.value ?? '—'}</div>
+            <div class="label">${it.label}</div>
+        </div>
+    `).join('');
+}
+
+function renderChart(labels, values) {
+    const ctx = document.getElementById('mainChart');
+    if (chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Overview',
+                data: values,
+                backgroundColor: ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444'],
+                borderRadius: 8,
+                borderSkipped: false,
+            }]
+        },
+        options: {
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+        }
+    });
+}
+
+// ── Agents ─────────────────────────────────────────────────────────────────
+// Actions are rendered as a "⋮" trigger button + dropdown menu (uses the
+// .actions-cell / .action-trigger-btn / .action-menu-panel classes already
+// defined in dashboard.css) instead of four separate inline buttons per row.
+async function loadAgents() {
+    const tbody = document.getElementById('agentsBody');
+    try {
+        const res  = await fetch('/api/admin/agents');
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const data = await res.json();
+
+        if (!data.agents || data.agents.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">No agents found.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.agents.map(a => `
+            <tr id="arow-${a.id}">
+                <td><strong>${esc(a.full_name)}</strong><br><span style="font-size:12px;color:#64748b;">@${esc(a.username)}</span></td>
+                <td>${esc(a.email || '—')}</td>
+                <td><span id="astatus-${a.id}" class="badge badge-${a.status}">${a.status}</span></td>
+                <td>${renderFlagCell(a)}</td>
+                <td>${a.total_quotes}</td>
+                <td>${a.total_policies}</td>
+                <td>KES ${Number(a.total_premium || 0).toLocaleString()}</td>
+                <td>
+                    <div class="actions-cell">
+                        <button class="action-trigger-btn" onclick="toggleActionMenu(event, ${a.id})">
+                            <i class="fas fa-ellipsis-vertical"></i> Actions
+                        </button>
+                        <div class="action-menu-panel" id="amenu-${a.id}">
+                            <button class="action-menu-item item-approve" onclick="setAgentStatus(${a.id},'approved')">
+                                <i class="fas fa-check"></i> Approve
+                            </button>
+                            <button class="action-menu-item item-reject" onclick="setAgentStatus(${a.id},'rejected')">
+                                <i class="fas fa-times"></i> Reject
+                            </button>
+                            <button class="action-menu-item item-suspend" onclick="setAgentStatus(${a.id},'suspended')">
+                                <i class="fas fa-pause"></i> Suspend
+                            </button>
+                            ${a.flagged ? `
+                            <button class="action-menu-item item-suspend" onclick="unflagAgent(${a.id})">
+                                <i class="fas fa-flag"></i> Clear Flag
+                            </button>` : ''}
+                            <button class="action-menu-item item-delete" onclick="deleteUser(${a.id}, '${escAttr(a.full_name)}')">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Failed to load agents:', err);
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:20px;">Failed to load agents. Please refresh.</td></tr>';
+    }
+}
+
+// Renders the Flag column: a red badge with the reason as a tooltip if the
+// agent is currently flagged (e.g. for an underpayment attempt), a small
+// muted count if they have past attempts but aren't currently flagged, or
+// a dash if they have no history at all.
+function renderFlagCell(a) {
+    if (a.flagged) {
+        const reason = escAttr(a.flagged_reason || 'Flagged for review');
+        const when = a.flagged_at ? new Date(a.flagged_at).toLocaleDateString('en-KE', {day:'2-digit', month:'short', year:'numeric'}) : '';
+        return `<span class="badge" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;cursor:help;" title="${reason}">
+                    <i class="fas fa-flag"></i> Flagged${when ? ' · ' + when : ''}
+                </span>`;
+    }
+    if (a.underpayment_attempts > 0) {
+        return `<span style="font-size:12px;color:#94a3b8;">${a.underpayment_attempts} past attempt(s)</span>`;
+    }
+    return '<span style="color:#cbd5e1;">—</span>';
+}
+
+// Only one action menu open at a time; closing on outside click.
+function toggleActionMenu(evt, id) {
+    evt.stopPropagation();
+    const panel = document.getElementById(`amenu-${id}`);
+    const wasOpen = panel.classList.contains('show');
+    document.querySelectorAll('.action-menu-panel.show').forEach(p => p.classList.remove('show'));
+    if (!wasOpen) panel.classList.add('show');
+}
+
+document.addEventListener('click', () => {
+    document.querySelectorAll('.action-menu-panel.show').forEach(p => p.classList.remove('show'));
+});
+
+async function setAgentStatus(id, status) {
+    try {
+        const res = await fetch(`/api/admin/agents/${id}/status`, {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ status })
+        });
+        if (res.ok) {
+            const el = document.getElementById(`astatus-${id}`);
+            el.className = `badge badge-${status}`;
+            el.innerText = status;
+        } else {
+            alert('Failed to update agent status.');
+        }
+    } catch (err) {
+        console.error('Error updating agent status:', err);
+        alert('Server communication error. Please try again.');
+    }
+    const panel = document.getElementById(`amenu-${id}`);
+    if (panel) panel.classList.remove('show');
+}
+
+async function unflagAgent(id) {
+    if (!confirm('Clear this underpayment flag? This confirms you have reviewed the attempt.')) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/admin/agents/${id}/unflag`, {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' })
+        });
+        if (res.ok) {
+            loadAgents(); // simplest correct way to refresh the flag cell + menu
+        } else {
+            alert('Failed to clear flag.');
+        }
+    } catch (err) {
+        console.error('Error clearing flag:', err);
+        alert('Server communication error. Please try again.');
+    }
+}
+
+async function deleteUser(id, fullName) {
+    if (!confirm(`WARNING: Are you sure you want to permanently delete agent "${fullName}"? This will remove all their associated clients, quotations, policies and claims records. This cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/admin/users/${id}`, {
+            method: 'DELETE',
+            headers: withCsrf({ 'Content-Type': 'application/json' })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            alert(data.error || 'Failed to delete user.');
+            return;
+        }
+
+        alert(data.message || 'User successfully removed.');
+
+        const row = document.getElementById(`arow-${id}`);
+        if (row) {
+            row.remove();
+            const tbody = document.getElementById('agentsBody');
+            if (tbody && tbody.rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">No agents found.</td></tr>';
+            }
+        }
+
+    } catch (error) {
+        console.error('Error deleting agent:', error);
+        alert('Server communication error. Please try again.');
+    }
+}
+
+// ── Policies (agent view) ───────────────────────────────────────────────────
+async function loadPolicies() {
+    const tbody = document.getElementById('policiesBody');
+    try {
+        const res  = await fetch('/api/policies/list');
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const data = await res.json();
+
+        const rows = data.policies || [];
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px;">No active policies yet.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = rows.map(p => {
+            const days = parseInt(p.days_remaining);
+            let expiryClass = 'expiry-green';
+            let expiryLabel = `${days} days left`;
+            if (isNaN(days) || days < 0) { expiryClass = 'expiry-expired'; expiryLabel = 'Expired'; }
+            else if (days <= 7)          { expiryClass = 'expiry-red';     expiryLabel = `${days} days left`; }
+            else if (days <= 30)         { expiryClass = 'expiry-orange';  expiryLabel = `${days} days left`; }
+
+            return `
+            <tr>
+                <td><span style="font-family:monospace; font-size:12px;">${esc(p.policy_no)}</span></td>
+                <td>${esc((p.first_name||'') + ' ' + (p.last_name||''))}<br><span style="font-size:12px;color:#64748b;">${esc(p.phone||'—')}</span></td>
+                <td>${esc(p.vehicle_reg||'—')}</td>
+                <td>${esc((p.type_of_cover||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))}</td>
+                <td>${p.expiry_date ? new Date(p.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                <td class="${expiryClass}">${expiryLabel}</td>
+                <td>KES ${Number(p.total_payable||0).toLocaleString()}</td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('Failed to load policies:', err);
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:20px;">Failed to load policies. Please refresh.</td></tr>';
+    }
+}
+
+// ── Reports ─────────────────────────────────────────────────────────────────
+async function loadReportSummary() {
+    try {
+        const period = document.getElementById('reportPeriod')?.value || 'monthly';
+        const res    = await fetch(`/api/reports/summary?period=${period}`);
+        if (!res.ok) return;
+        const d = await res.json();
+
+        document.getElementById('reportSummary').innerHTML = `
+            <div class="kpi-row">
+                <div class="kpi-pill">
+                    <strong>${d.totals.quotes}</strong>Quotations
+                </div>
+                <div class="kpi-pill">
+                    <strong>${d.totals.policies}</strong>Policies Sold
+                </div>
+                <div class="kpi-pill">
+                    <strong>KES ${Number(d.totals.premium).toLocaleString()}</strong>Total Premium
+                </div>
+            </div>
+            <p style="font-size:12px; color:#64748b;">Period: ${d.start} → ${d.end}</p>
+        `;
+    } catch (err) {
+        console.error('Failed to load report summary:', err);
+    }
+}
+
+async function downloadReport(fmt) {
+    const period = document.getElementById('reportPeriod').value;
+    window.location.href = `/api/reports/download?period=${period}&format=${fmt}`;
+}
+
+// Re-load summary when period changes
+document.addEventListener('DOMContentLoaded', () => {
+    const sel = document.getElementById('reportPeriod');
+    if (sel) sel.addEventListener('change', loadReportSummary);
+});
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// For values embedded inside a single-quoted inline JS string attribute
+// (e.g. onclick="deleteUser(1, '...')") — escapes quotes/backslashes so a
+// name like O'Brien or a name containing a backslash can't break out of
+// the string literal.
+function escAttr(s) {
+    return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+}
+
+// ── Double Insurance Check ───────────────────────────────────────────────────
+async function checkDoubleInsurance() {
+    const input = document.getElementById('doubleInsuranceQuery');
+    const box   = document.getElementById('doubleInsuranceResults');
+    const q     = input.value.trim();
+
+    if (q.length < 3) {
+        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Enter at least 3 characters.</p>';
+        return;
+    }
+
+    box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Searching…</p>';
+
+    try {
+        const res  = await fetch(`/api/policies/check-double-insurance?query=${encodeURIComponent(q)}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+            box.innerHTML = `<p style="color:#dc2626;font-size:13px;">${esc(data.error || 'Search failed.')}</p>`;
+            return;
+        }
+
+        if (!data.results || data.results.length === 0) {
+            box.innerHTML = `<p style="color:#16a34a;font-size:13px;"><i class="fas fa-circle-check"></i> No matching policies found. This vehicle looks clear.</p>`;
+            return;
+        }
+
+        const warning = data.has_active_match
+            ? `<p style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;">
+                 <i class="fas fa-triangle-exclamation"></i> This vehicle has an ACTIVE policy. Issuing a new one now will likely be rejected by DMVIC as Double Insurance.
+               </p>`
+            : `<p style="color:#64748b;font-size:13px;">No currently-active match, but see history below.</p>`;
+
+        const rowsHtml = data.results.map(r => {
+            const badge = r.is_double_insurance_risk
+                ? '<span class="badge" style="background:#fef2f2;color:#dc2626;">Active</span>'
+                : `<span class="badge" style="background:#f1f5f9;color:#64748b;">${esc(r.status)}</span>`;
+            return `
+                <tr>
+                    <td><span style="font-family:monospace;font-size:12px;">${esc(r.policy_no)}</span></td>
+                    <td>${esc(r.vehicle_reg || '—')}</td>
+                    <td>${esc(r.chassis_number || '—')}</td>
+                    <td>${esc(r.client_name || '—')}</td>
+                    <td>${esc((r.type_of_cover||'').replace(/_/g,' '))}</td>
+                    <td>${r.expiry_date ? new Date(r.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                    <td>${badge}</td>
+                </tr>`;
+        }).join('');
+
+        box.innerHTML = `
+            ${warning}
+            <div style="overflow-x:auto;margin-top:10px;">
+                <table class="agent-table">
+                    <thead>
+                        <tr>
+                            <th>Policy No</th><th>Reg No</th><th>Chassis</th>
+                            <th>Client</th><th>Cover</th><th>Expiry</th><th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>`;
+    } catch (err) {
+        console.error('Double insurance check failed:', err);
+        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Server communication error. Please try again.</p>';
+    }
+}
+
+// ── Certificate Declarations ─────────────────────────────────────────────────
+const INSURER_LABELS = {
+    monarch:    'Monarch',
+    directline: 'Directline',
+    definite:   'Definite Assurance',
+};
+
+let _pendingDeclarations = {};   // company -> {count, total_premium, certificates:[...]}
+let _declModalCompany = null;
+
+async function loadDeclarations() {
+    await Promise.all([loadPendingDeclarations(), loadDeclarationsHistory()]);
+}
+
+async function loadPendingDeclarations() {
+    const box = document.getElementById('declarationsGroups');
+    try {
+        const res = await fetch('/api/admin/declarations/pending');
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const data = await res.json();
+        _pendingDeclarations = data.pending || {};
+
+        const companies = Object.keys(_pendingDeclarations);
+        if (companies.length === 0) {
+            box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Nothing pending — every issued certificate has been declared.</p>';
+            return;
+        }
+
+        box.innerHTML = companies.map(company => {
+            const group = _pendingDeclarations[company];
+            const label = INSURER_LABELS[company] || company;
+            const rows = group.certificates.map(c => `
+                <tr>
+                    <td><input type="checkbox" class="decl-cert-cb" data-company="${escAttr(company)}" value="${escAttr(c.policy_no)}" checked></td>
+                    <td><span style="font-family:monospace;font-size:12px;">${esc(c.policy_no)}</span></td>
+                    <td>${esc(c.dmvic_certificate_no || '—')}</td>
+                    <td>${esc(c.policy_holder_name || '—')}</td>
+                    <td>${esc(c.vehicle_reg || '—')}</td>
+                    <td>KES ${Number(c.total_payable || 0).toLocaleString()}</td>
+                </tr>`).join('');
+
+            return `
+            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-top:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                    <h4 style="margin:0;font-size:15px;">${esc(label)}
+                        <span style="font-weight:400;color:#64748b;font-size:13px;">
+                            — ${group.count} pending · KES ${Number(group.total_premium).toLocaleString()}
+                        </span>
+                    </h4>
+                    <div style="display:flex;gap:8px;">
+                        <button onclick="toggleAllDecl('${escAttr(company)}', true)" style="padding:6px 10px;font-size:12px;background:#f1f5f9;border:none;border-radius:6px;cursor:pointer;">Select all</button>
+                        <button onclick="toggleAllDecl('${escAttr(company)}', false)" style="padding:6px 10px;font-size:12px;background:#f1f5f9;border:none;border-radius:6px;cursor:pointer;">Clear</button>
+                        <button onclick="openDeclarationModal('${escAttr(company)}')" style="padding:6px 14px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                            <i class="fas fa-paper-plane"></i> Send
+                        </button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;margin-top:10px;">
+                    <table class="agent-table">
+                        <thead><tr><th></th><th>Policy No</th><th>Certificate #</th><th>Insured</th><th>Vehicle</th><th>Premium</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        console.error('Failed to load pending declarations:', err);
+        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Failed to load pending certificates. Please refresh.</p>';
+    }
+}
+
+function toggleAllDecl(company, checked) {
+    document.querySelectorAll(`.decl-cert-cb[data-company="${CSS.escape(company)}"]`)
+        .forEach(cb => cb.checked = checked);
+}
+
+function _selectedPolicyNos(company) {
+    return Array.from(document.querySelectorAll(`.decl-cert-cb[data-company="${CSS.escape(company)}"]:checked`))
+        .map(cb => cb.value);
+}
+
+function openDeclarationModal(company) {
+    const selected = _selectedPolicyNos(company);
+    if (selected.length === 0) {
+        alert('Select at least one certificate first.');
+        return;
+    }
+    const group = _pendingDeclarations[company];
+    const total = group.certificates
+        .filter(c => selected.includes(c.policy_no))
+        .reduce((sum, c) => sum + Number(c.total_payable || 0), 0);
+
+    _declModalCompany = company;
+    document.getElementById('declModalCompany').innerText = INSURER_LABELS[company] || company;
+    document.getElementById('declModalCount').innerText = selected.length;
+    document.getElementById('declModalTotal').innerText = total.toLocaleString();
+    document.getElementById('declModalMpesa').value = '';
+    document.getElementById('declarationModalOverlay').style.display = 'flex';
+}
+
+function closeDeclarationModal() {
+    document.getElementById('declarationModalOverlay').style.display = 'none';
+    _declModalCompany = null;
+}
+
+async function confirmSendDeclaration() {
+    const company = _declModalCompany;
+    if (!company) return;
+
+    const mpesaMessage = document.getElementById('declModalMpesa').value.trim();
+    if (!mpesaMessage) {
+        alert('Please paste the M-Pesa confirmation message.');
+        return;
+    }
+    const policyNos = _selectedPolicyNos(company);
+    if (policyNos.length === 0) {
+        alert('No certificates selected.');
+        closeDeclarationModal();
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/admin/declarations/send', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ company, policy_nos: policyNos, mpesa_message: mpesaMessage })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || 'Failed to send declaration.');
+            return;
+        }
+        alert(data.email_sent
+            ? `Declaration sent to ${data.sent_to}.`
+            : `Declaration saved, but the email failed to send. You can download and send it manually.`);
+        closeDeclarationModal();
+        loadDeclarations();
+    } catch (err) {
+        console.error('Failed to send declaration:', err);
+        alert('Server communication error. Please try again.');
+    }
+}
+
+async function loadDeclarationsHistory() {
+    const tbody = document.getElementById('declarationsHistoryBody');
+    try {
+        const res = await fetch('/api/admin/declarations/history');
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const data = await res.json();
+        const rows = data.declarations || [];
+
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:16px;">No declarations sent yet.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = rows.map(d => `
+            <tr>
+                <td>${d.created_at ? new Date(d.created_at).toLocaleString('en-KE') : '—'}</td>
+                <td>${esc(INSURER_LABELS[d.company] || d.company)}</td>
+                <td>${d.certificate_count}</td>
+                <td>KES ${Number(d.total_premium || 0).toLocaleString()}</td>
+                <td>${esc(d.email_sent_to || '—')}</td>
+                <td>${d.email_sent
+                    ? '<span class="badge" style="background:#f0fdf4;color:#16a34a;">Sent</span>'
+                    : '<span class="badge" style="background:#fef2f2;color:#dc2626;">Not sent</span>'}</td>
+                <td><a href="/api/admin/declarations/${esc(d.id)}/download" style="color:#2563eb;"><i class="fas fa-download"></i> Download</a></td>
+            </tr>`).join('');
+    } catch (err) {
+        console.error('Failed to load declaration history:', err);
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:16px;">Failed to load history.</td></tr>';
+    }
+}
+
+async function logout() {
+    await fetch('/api/logout');
+    window.location.href = '/login';
+}
+
+loadDashboard();
+</script>
+<script>
+// ── Mobile Sidebar ───────────────────────────────────────────
+function openSidebar() {
+    document.querySelector('.sidebar').classList.add('open');
+    document.getElementById('sidebarOverlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        a.addEventListener('click', closeSidebar);
+    });
+});
+</script>
+
+</body>
+</html>

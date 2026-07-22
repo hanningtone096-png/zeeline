@@ -1,0 +1,44 @@
+# ── Environment / secrets ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Python ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+pip-log.txt
+
+# ── Flask ────────────────────────────────────────────────────────────
+instance/
+.flask_session/
+
+# ── App-specific runtime data ──────────────────────────────────────────
+backend/uploads/
+*.log
+
+# ── Databases ───────────────────────────────────────────────────────────
+*.sqlite3
+*.db
+backend/backup_*.sql
+# ── OS junk ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Node (if you ever add a JS build step) ─────────────────────────────
+node_modules/
