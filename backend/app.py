@@ -3295,41 +3295,9 @@ def unflag_agent(agent_id):
 @admin_required
 @limiter.limit("10 per minute")
 def delete_user(target_user_id):
-    if session.get('user_id') == target_user_id:
-        return jsonify({"error": "You cannot delete your own admin account."}), 400
-
-    try:
-        user = query("SELECT id, username FROM users WHERE id = %s", (target_user_id,), fetchone=True)
-        if not user:
-            return jsonify({"error": "User not found."}), 404
-
-        dependencies = [
-            ("DELETE FROM verification_codes WHERE user_id = %s", (target_user_id,)),
-            ("DELETE FROM documents WHERE user_id = %s", (target_user_id,)),
-            ("DELETE FROM claims WHERE agent_id = %s", (target_user_id,)),
-            ("DELETE FROM payments WHERE policy_no IN (SELECT policy_no FROM policies WHERE agent_id = %s)", (target_user_id,)),
-            ("DELETE FROM policies WHERE agent_id = %s", (target_user_id,)),
-            ("DELETE FROM quotations WHERE agent_id = %s", (target_user_id,)),
-            ("DELETE FROM clients WHERE agent_id = %s", (target_user_id,)),
-            ("DELETE FROM audit_log WHERE user_id = %s", (target_user_id,)),
-        ]
-
-        for sql, params in dependencies:
-            try:
-                query(sql, params, commit=True)
-            except Exception as table_err:
-                log.warning("Skipping dependency cleanup step (%s): %s",
-                            sql.split()[2], type(table_err).__name__)
-
-        query("DELETE FROM users WHERE id = %s", (target_user_id,), commit=True)
-
-        query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
-              (session['user_id'], 'user_deleted', f"target_user_id={target_user_id}"), commit=True)
-
-        return jsonify({"message": f"User '{user['username']}' and related records were deleted."}), 200
-
-    except Exception as e:
-        return safe_error_response(e, "Could not delete this user.")
+    return jsonify({
+        "error": "Permanent user deletion is disabled. Suspend the account instead to preserve its records."
+    }), 405
 
 
 # ─────────────────────────────────────────────────────────────────────────────

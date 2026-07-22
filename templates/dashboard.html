@@ -344,8 +344,8 @@ async function loadAgents() {
                             <button class="action-menu-item item-suspend" onclick="unflagAgent(${a.id})">
                                 <i class="fas fa-flag"></i> Clear Flag
                             </button>` : ''}
-                            <button class="action-menu-item item-delete" onclick="deleteUser(${a.id}, '${escAttr(a.full_name)}')">
-                                <i class="fas fa-trash"></i> Delete
+                            <button class="action-menu-item item-suspend" onclick="suspendUser(${a.id}, '${escAttr(a.full_name)}')">
+                                <i class="fas fa-ban"></i> Suspend
                             </button>
                         </div>
                     </div>
@@ -431,36 +431,29 @@ async function unflagAgent(id) {
     }
 }
 
-async function deleteUser(id, fullName) {
-    if (!confirm(`WARNING: Are you sure you want to permanently delete agent "${fullName}"? This will remove all their associated clients, quotations, policies and claims records. This cannot be undone.`)) {
+async function suspendUser(id, fullName) {
+    if (!confirm(`Suspend agent "${fullName}"? Their access will be disabled, but their clients, quotations, policies, and claims will be kept and can be restored by reactivating the account.`)) {
         return;
     }
 
     try {
-        const res = await fetch(`/api/admin/users/${id}`, {
-            method: 'DELETE',
-            headers: withCsrf({ 'Content-Type': 'application/json' })
+        const res = await fetch(`/api/admin/agents/${id}/status`, {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ status: 'suspended' })
         });
         const data = await res.json();
 
         if (!res.ok) {
-            alert(data.error || 'Failed to delete user.');
+            alert(data.error || 'Failed to suspend user.');
             return;
         }
 
-        alert(data.message || 'User successfully removed.');
-
-        const row = document.getElementById(`arow-${id}`);
-        if (row) {
-            row.remove();
-            const tbody = document.getElementById('agentsBody');
-            if (tbody && tbody.rows.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">No agents found.</td></tr>';
-            }
-        }
+        alert('Agent suspended. Their records were preserved.');
+        loadAgents();
 
     } catch (error) {
-        console.error('Error deleting agent:', error);
+        console.error('Error suspending agent:', error);
         alert('Server communication error. Please try again.');
     }
 }
@@ -548,7 +541,7 @@ function esc(s) {
 }
 
 // For values embedded inside a single-quoted inline JS string attribute
-// (e.g. onclick="deleteUser(1, '...')") — escapes quotes/backslashes so a
+// (e.g. onclick="suspendUser(1, '...')") — escapes quotes/backslashes so a
 // name like O'Brien or a name containing a backslash can't break out of
 // the string literal.
 function escAttr(s) {
