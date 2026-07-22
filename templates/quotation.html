@@ -808,7 +808,7 @@ async function generateQuote() {
         });
         const r = await res.json();
 
-        if (!res.ok) { showError(r.error || 'Failed to generate quotation.'); currentStep = 1; showStep(); return; }
+        if (!res.ok) { showError(r.error || 'Failed to generate quotation.'); return; }
 
         lastQuoteId = r.quote.id;
 

@@ -109,8 +109,10 @@ def _coerce_field(field, value):
     if field in DATE_FIELDS and isinstance(value, str):
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y%m%d%H%M%S"):
             try:
-                parsed = datetime.strptime(value, fmt)
-                return parsed if " " in fmt or fmt == "%Y%m%d%H%M%S" else parsed.date()
+                # PyMongo supports datetime values but not datetime.date values.
+                # Keep date-only form fields at midnight so they remain queryable
+                # as dates without causing quotation creation to fail.
+                return datetime.strptime(value, fmt)
             except ValueError:
                 pass
     return value
