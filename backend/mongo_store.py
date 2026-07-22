@@ -166,7 +166,7 @@ class MongoStore:
         return self.db[table]
 
     def _ensure_indexes(self):
-        self.db.counters.create_index([("_id", ASCENDING)], unique=True)
+        self.db.counters.create_index([("_id", ASCENDING)])
         for table in AUTO_ID_TABLES:
             self._collection(table).create_index([("id", ASCENDING)], unique=True)
         self.db.users.create_index([("username", ASCENDING)], unique=True)
