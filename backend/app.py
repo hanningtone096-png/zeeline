@@ -574,6 +574,22 @@ def dmvic_cert_tuple():
     if os.path.exists(cert_path) and os.path.exists(key_path):
         return (cert_path, key_path)
 
+    cert_pem = os.environ.get('DMVIC_CERT_PEM', '')
+    key_pem = os.environ.get('DMVIC_KEY_PEM', '')
+    if cert_pem and key_pem:
+        try:
+            pem_dir = '/tmp/westlake-dmvic'
+            os.makedirs(pem_dir, mode=0o700, exist_ok=True)
+            cert_path = os.path.join(pem_dir, 'client-cert.pem')
+            key_path = os.path.join(pem_dir, 'client-key.pem')
+            for path, pem in ((cert_path, cert_pem), (key_path, key_pem)):
+                with open(path, 'w', encoding='utf-8') as pem_file:
+                    pem_file.write(pem)
+                os.chmod(path, 0o600)
+            return (cert_path, key_path)
+        except OSError:
+            log.error("Could not prepare DMVIC client certificate files")
+
     log.warning("DMVIC mTLS cert or key missing at: %s / %s", cert_path, key_path)
     return None
 
@@ -3657,6 +3673,43 @@ def generate_quotation():
     })
 
 
+@app.route('/api/quotations/pdf/<quote_id>')
+@login_required
+def download_quotation_pdf(quote_id):
+    if not PDF_AVAILABLE:
+        return jsonify({"error": "Quotation PDF generation is unavailable."}), 503
+
+    quote = query("SELECT * FROM quotations WHERE id=%s", (quote_id,), fetchone=True)
+    if not quote:
+        return jsonify({"error": "Quotation not found."}), 404
+    if session['role'] != 'admin' and quote.get('agent_id') != session['user_id']:
+        return jsonify({"error": "You do not have access to this quotation."}), 403
+
+    agent = query("SELECT full_name, email FROM users WHERE id=%s",
+                  (quote.get('agent_id'),), fetchone=True) or {}
+    try:
+        pdf_bytes = generate_quote_pdf(
+            quote,
+            quote_id,
+            {"name": agent.get('full_name', ''), "email": agent.get('email', '')},
+        )
+    except Exception:
+        log.exception("Quotation PDF generation failed for %s", quote_id)
+        return jsonify({"error": "Could not generate this quotation PDF."}), 500
+
+    if not pdf_bytes:
+        return jsonify({"error": "Quotation PDF generation is unavailable."}), 503
+
+    filename = secure_filename(f"quotation-{quote_id}.pdf") or "quotation.pdf"
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename,
+        max_age=0,
+    )
+
+
 @app.route('/api/quotations/list')
 @login_required
 def list_quotations():
@@ -3777,11 +3830,11 @@ def policy_dmvic_status(policy_no):
         return jsonify({"error": "You do not have access to this policy"}), 403
 
     return jsonify({
-        "policy_no":       row['policy_no'],
-        "dmvic_status":    row['dmvic_status'],
-        "certificate_no":  row['dmvic_certificate_no'],
-        "transaction_no":  row['dmvic_transaction_no'],
-        "error":           row['dmvic_error'],
+        "policy_no":       row.get('policy_no'),
+        "dmvic_status":    row.get('dmvic_status'),
+        "certificate_no":  row.get('dmvic_certificate_no'),
+        "transaction_no":  row.get('dmvic_transaction_no'),
+        "error":           row.get('dmvic_error'),
     })
 
 

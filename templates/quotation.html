@@ -855,9 +855,9 @@ async function generateQuote() {
                 ${breakdownHtml}
 
                 <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px;">
-                    <button onclick="window.location.href='/api/quotations/pdf/${esc(r.quote.id)}'"
+                    <button type="button" onclick="downloadQuotePdf('${esc(r.quote.id)}', this)"
                         style="background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe;">
-                        <i class="fas fa-file-pdf"></i> Download PDF
+                        <i class="fas fa-file-pdf"></i> Download Quote PDF
                     </button>
                     <button onclick="window.print()"
                         style="background:#f1f5f9; color:#475569;">
@@ -886,6 +886,37 @@ async function generateQuote() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-calculator"></i> Generate Quote';
+    }
+}
+
+async function downloadQuotePdf(quoteId, button) {
+    if (button.disabled) return;
+
+    const originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF…';
+
+    try {
+        const response = await fetch(`/api/quotations/pdf/${encodeURIComponent(quoteId)}`);
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Could not download this quotation PDF.');
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `quotation-${quoteId}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        showError(error.message || 'Could not download this quotation PDF.');
+    } finally {
+        button.disabled = false;
+        button.innerHTML = originalHtml;
     }
 }
 
