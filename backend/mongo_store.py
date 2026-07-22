@@ -481,13 +481,22 @@ class MongoStore:
             if start:
                 qrows = [r for r in qrows if _as_date(r.get("created_at")) and _as_date(r.get("created_at")) >= start]
                 prows = [r for r in prows if _as_date(r.get("created_at")) and _as_date(r.get("created_at")) >= start]
-            row = dict(agent)
-            row.update({
+            row = {
+                "id": agent.get("id"),
+                "full_name": agent.get("full_name"),
+                "username": agent.get("username"),
+                "email": agent.get("email"),
+                "status": agent.get("status"),
+                "created_at": agent.get("created_at"),
+                "flagged": agent.get("flagged", 0),
+                "flagged_reason": agent.get("flagged_reason"),
+                "flagged_at": agent.get("flagged_at"),
+                "underpayment_attempts": agent.get("underpayment_attempts", 0),
                 "total_quotes": len(qrows),
                 "total_policies": len(prows),
                 "total_premium": sum(float(q.get("total_payable") or 0) for q in qrows),
                 "total_clients": len(clients),
-            })
+            }
             rows.append(row)
         return rows
 
