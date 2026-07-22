@@ -441,7 +441,8 @@ class MongoStore:
             return {"total": self._collection(table).count_documents(filter_doc)}
         field = re.search(r"sum\((\w+)\)", sql_l).group(1)
         total = sum(float(doc.get(field) or 0) for doc in self._collection(table).find(filter_doc, {field: 1}))
-        return {"total": total}
+        alias_match = re.search(r"\bas\s+(\w+)", sql_l)
+        return {(alias_match.group(1) if alias_match else "total"): total}
 
     def _with_agent(self, doc, *, prefix="agent"):
         out = dict(doc)

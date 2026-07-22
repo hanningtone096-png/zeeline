@@ -412,7 +412,7 @@ def mpesa_query_status(checkout_request_id):
             timeout=15
         )
         data = res.json()
-        status = data.get('status')
+        status = (data.get('status') or '').strip().lower()
         paid = res.ok and data.get('success') and status == 'completed'
         log.info("ArchPay verify status=%s payment_status=%s", res.status_code, status)
         return {
@@ -4211,11 +4211,15 @@ def mpesa_stk():
         return jsonify({"error": "Amount must be greater than zero"}), 400
 
     quoted_amount = float(policy['total_payable'])
-    already_paid  = query("""
+    paid_row = query("""
         SELECT COALESCE(SUM(amount),0) AS paid FROM payments
         WHERE policy_no=%s AND status='completed'
-    """, (policy_no,), fetchone=True)['paid']
-    balance = round(quoted_amount - float(already_paid), 2)
+    """, (policy_no,), fetchone=True) or {}
+    already_paid = float(paid_row.get('paid', 0) or 0)
+    balance = round(quoted_amount - already_paid, 2)
+
+    if balance <= 0:
+        return jsonify({"error": "This policy has already been paid in full."}), 400
 
     if amount < balance - MAX_UNDERPAYMENT_ALLOWED:
         agent = {
@@ -4266,8 +4270,9 @@ def mpesa_stk():
     existing = query("SELECT id FROM payments WHERE policy_no=%s AND method='mpesa'",
                      (policy_no,), fetchone=True)
     if existing:
-        query("UPDATE payments SET reference=%s, status='pending' WHERE policy_no=%s AND method='mpesa'",
-              (result['checkout_request_id'], policy_no), commit=True)
+        query("""UPDATE payments SET amount=%s, reference=%s, status='pending', paid_at=NULL
+                 WHERE policy_no=%s AND method='mpesa'""",
+              (amount, result['checkout_request_id'], policy_no), commit=True)
     else:
         query("INSERT INTO payments (policy_no, amount, status, method, reference) VALUES (%s,%s,'pending','mpesa',%s)",
               (policy_no, amount, result['checkout_request_id']), commit=True)
@@ -4350,8 +4355,8 @@ def mpesa_callback(secret):
 
         if status == 'completed':
             mpesa_ref = data.get('mpesaReceiptNumber') or ref
-            query("UPDATE payments SET status='completed', paid_at=NOW(), reference=%s WHERE reference=%s",
-                  (mpesa_ref or ref, ref), commit=True)
+            query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
+                  (ref,), commit=True)
             query("UPDATE policies SET status='active', updated_at=NOW() WHERE policy_no=%s",
                   (pmt['policy_no'],), commit=True)
             query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
