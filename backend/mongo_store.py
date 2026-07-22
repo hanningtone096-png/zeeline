@@ -377,6 +377,21 @@ class MongoStore:
         return self._collection(table).delete_many(filter_doc).deleted_count
 
     def _read(self, sql, sql_l, params):
+        if "from users u" in sql_l and "where u.role = 'agent'" in sql_l:
+            return self._agent_summary(params, period_start=("date(q.created_at)" in sql_l))
+        if "from clients c left join users" in sql_l:
+            return self._clients_with_agents(params if "where c.agent_id" in sql_l else ())
+        if "from claims c left join users" in sql_l:
+            return self._claims_with_agents(params if "where c.agent_id" in sql_l else ())
+        if "from quotations q left join users" in sql_l:
+            return self._quotations_with_agents(params, period_start=("date(q.created_at)" in sql_l))
+        if "from policies p" in sql_l and " left join " in sql_l:
+            return self._policies_join(sql_l, params)
+        if "from declarations d left join users" in sql_l:
+            return self._declarations_history()
+        if "from audit_log a left join users" in sql_l:
+            return self._audit_log()
+
         if "count(*) as total" in sql_l:
             return [self._count_or_sum(sql_l, params)]
         if "coalesce(sum(" in sql_l:
@@ -386,20 +401,6 @@ class MongoStore:
         if re.match(r"select [\w,\s]+ from \w+ where", sql_l):
             return self._select_simple(sql_l, params)
 
-        if "from users u" in sql_l and "where u.role = 'agent'" in sql_l:
-            return self._agent_summary(params, period_start=("date(q.created_at)" in sql_l))
-        if "from clients c left join users" in sql_l:
-            return self._clients_with_agents(params if "where c.agent_id" in sql_l else ())
-        if "from claims c left join users" in sql_l:
-            return self._claims_with_agents(params if "where c.agent_id" in sql_l else ())
-        if "from quotations q left join users" in sql_l:
-            return self._quotations_with_agents(params, period_start=("date(q.created_at)" in sql_l))
-        if "from policies p left join users" in sql_l or "from policies p left join clients" in sql_l:
-            return self._policies_join(sql_l, params)
-        if "from declarations d left join users" in sql_l:
-            return self._declarations_history()
-        if "from audit_log a left join users" in sql_l:
-            return self._audit_log()
         if "from verification_codes" in sql_l:
             return self._select_simple(sql_l, params)
         if "from payments" in sql_l:
