@@ -178,6 +178,10 @@ class MongoStore:
         self.db.quotations.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])
         self.db.policies.create_index([("policy_no", ASCENDING)], unique=True)
         self.db.policies.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])
+        # MongoDB documents are schema-flexible, so the DMVIC issuance-request
+        # field needs no ALTER TABLE equivalent. This sparse index is the
+        # Mongo counterpart of the SQL migration and keeps the review queue fast.
+        self.db.policies.create_index([("dmvic_issuance_request_id", ASCENDING)], sparse=True)
         self.db.payments.create_index([("policy_no", ASCENDING)])
         self.db.payments.create_index([("reference", ASCENDING)])
         self.db.claims.create_index([("id", ASCENDING)], unique=True)

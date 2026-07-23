@@ -668,47 +668,122 @@ DMVIC_LOGIN_ERRORS = {
 }
 
 _dmvic_token_cache = {"token": None, "expires": None}
+_dmvic_token_lock = threading.Lock()
 
 # ── Existing DMVIC functions below ──────────────────────────────────────────
 
-def dmvic_get_token():
+def dmvic_get_token(force_refresh=False):
     """POST /api/v1/Account/Login. Caches the token in-process until
     shortly before its stated expiry so we don't log in on every single
-    certificate issuance."""
-    cached = _dmvic_token_cache.get("token")
-    expires = _dmvic_token_cache.get("expires")
-    if cached and expires and datetime.now() < expires - timedelta(minutes=5):
-        return cached
+    certificate issuance. DMVIC keeps one active token per account, so the
+    cache refresh is serialized to prevent concurrent workers from invalidating
+    each other's token. Set force_refresh after an ER001 response.
+    """
+    with _dmvic_token_lock:
+        cached = _dmvic_token_cache.get("token")
+        expires = _dmvic_token_cache.get("expires")
+        if not force_refresh and cached and expires and datetime.now() < expires - timedelta(minutes=5):
+            return cached
 
+        try:
+            res = requests.post(
+                f"{DMVIC_BASE_URL}/api/v1/Account/Login",
+                json={
+                    "Username": DMVIC_API_USERNAME,
+                    "Password": DMVIC_API_PASSWORD,
+                    "ClientID": DMVIC_CLIENT_ID,
+                },
+                cert=dmvic_cert_tuple(),
+                timeout=15,
+            )
+            data = res.json()
+        except Exception as e:
+            log.error("DMVIC login error: %s: %s", type(e).__name__, e)
+            return None
+
+        if data.get("code") == 1 and data.get("token"):
+            _dmvic_token_cache["token"] = data["token"]
+            try:
+                _dmvic_token_cache["expires"] = datetime.fromisoformat(
+                    data["expires"].replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+            except Exception:
+                _dmvic_token_cache["expires"] = datetime.now() + timedelta(hours=1)
+            return data["token"]
+
+        code = data.get("code")
+        log.error("DMVIC login failed (code=%s): %s", code, DMVIC_LOGIN_ERRORS.get(code, data.get("message")))
+        return None
+
+
+def _dmvic_is_token_error(result):
+    if result.get("success"):
+        return False
+    return "ER001" in (result.get("error_codes") or [])
+
+
+def dmvic_issue_with_retry(issue_fn, token, **kwargs):
+    """Retry one issuance only when DMVIC explicitly rejects its token."""
+    result = issue_fn(token, **kwargs)
+    if not _dmvic_is_token_error(result):
+        return result
+
+    log.warning("DMVIC issuance returned ER001; refreshing the token for one retry")
+    fresh_token = dmvic_get_token(force_refresh=True)
+    return issue_fn(fresh_token, **kwargs) if fresh_token else result
+
+
+def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approved,
+                                        is_logbook_verified, is_vehicle_inspected,
+                                        additional_comments='', usernames=''):
+    """Complete a DMVIC policy-alert issuance after an admin review."""
+    payload = {
+        "IssuanceRequestID": issuance_request_id,
+        "IsApproved": bool(is_approved),
+        "IsLogBookVerified": bool(is_logbook_verified),
+        "IsVehicleInspected": bool(is_vehicle_inspected),
+        "AdditionalComments": additional_comments or "",
+        "Usernames": usernames or "",
+    }
     try:
         res = requests.post(
-            f"{DMVIC_BASE_URL}/api/v1/Account/Login",
-            json={
-                "Username": DMVIC_API_USERNAME,
-                "Password": DMVIC_API_PASSWORD,
+            f"{DMVIC_BASE_URL}/api/v6/Integration/ConfirmCertificateIssuance",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
                 "ClientID": DMVIC_CLIENT_ID,
             },
             cert=dmvic_cert_tuple(),
-            timeout=15,
+            timeout=25,
         )
         data = res.json()
     except Exception as e:
-        log.error("DMVIC login error: %s: %s", type(e).__name__, e)
-        return None
+        log.error("DMVIC confirm-issuance error: %s", type(e).__name__)
+        return {"success": False, "error": "Could not reach DMVIC. Please try again."}
 
-    if data.get("code") == 1 and data.get("token"):
-        _dmvic_token_cache["token"] = data["token"]
-        try:
-            _dmvic_token_cache["expires"] = datetime.fromisoformat(
-                data["expires"].replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-        except Exception:
-            _dmvic_token_cache["expires"] = datetime.now() + timedelta(hours=1)
-        return data["token"]
+    if data.get("success"):
+        txn = (data.get("callbackObj") or {}).get("issueCertificate") or data.get("Transaction", {})
+        return {
+            "success": True,
+            "transaction_no": txn.get("TransactionNo"),
+            "certificate_no": txn.get("actualCNo") or txn.get("CertificateNo"),
+            "api_request_number": data.get("APIRequestNumber"),
+        }
 
-    code = data.get("code")
-    log.error("DMVIC login failed (code=%s): %s", code, DMVIC_LOGIN_ERRORS.get(code, data.get("message")))
-    return None
+    errors = data.get("Errors") or data.get("Error") or []
+    if isinstance(errors, dict):
+        errors = [errors]
+    messages = []
+    for error in errors:
+        code = error.get("code") or error.get("errorCode", "")
+        message = error.get("message") or error.get("errorText", "")
+        messages.append(DMVIC_ERROR_MESSAGES.get(code, message) or message)
+    log.warning("DMVIC confirm-issuance failed (%s): %s", data.get("APIRequestNumber"), messages)
+    return {
+        "success": False,
+        "error": "; ".join(messages) or "Certificate confirmation failed.",
+        "error_codes": [error.get("code") or error.get("errorCode") for error in errors],
+    }
 def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, policyholder, policy_number,
                              commencing_date, expiring_date, chassis_number, phone_number,
                              body_type, licensed_to_carry, email, insured_pin,
@@ -798,6 +873,7 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
+        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
     }
 
 
@@ -893,6 +969,7 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
+        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
     }
 
 
@@ -981,6 +1058,7 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
+        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
     }
 
 
@@ -1087,6 +1165,7 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
+        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
     }
 
 
@@ -1209,7 +1288,8 @@ def issue_dmvic_certificate(policy_no, quote_row):
         query("""UPDATE policies SET dmvic_status='pending', dmvic_cert_type=%s
                   WHERE policy_no=%s""", (str(cert_type), policy_no), commit=True)
 
-        result = dmvic_issue_certificate(
+        result = dmvic_issue_with_retry(
+            dmvic_issue_certificate,
             token,
             member_company_id=member_company_id,
             cert_type=cert_type,
@@ -1291,7 +1371,8 @@ def issue_dmvic_certificate(policy_no, quote_row):
         query("""UPDATE policies SET dmvic_status='pending', dmvic_cert_type=%s
                   WHERE policy_no=%s""", (f"type_b_{vehicle_type}", policy_no), commit=True)
 
-        result = dmvic_issue_certificate_type_b(
+        result = dmvic_issue_with_retry(
+            dmvic_issue_certificate_type_b,
             token,
             member_company_id=member_company_id,
             cover_type=cover_type,
@@ -1335,7 +1416,8 @@ def issue_dmvic_certificate(policy_no, quote_row):
         query("""UPDATE policies SET dmvic_status='pending', dmvic_cert_type='type_c'
                   WHERE policy_no=%s""", (policy_no,), commit=True)
 
-        result = dmvic_issue_certificate_type_c(
+        result = dmvic_issue_with_retry(
+            dmvic_issue_certificate_type_c,
             token,
             member_company_id=member_company_id,
             cover_type=cover_type,
@@ -1393,7 +1475,8 @@ def issue_dmvic_certificate(policy_no, quote_row):
         query("""UPDATE policies SET dmvic_status='pending', dmvic_cert_type='type_d'
                   WHERE policy_no=%s""", (policy_no,), commit=True)
 
-        result = dmvic_issue_certificate_type_d(
+        result = dmvic_issue_with_retry(
+            dmvic_issue_certificate_type_d,
             token,
             member_company_id=member_company_id,
             type_of_certificate=type_of_certificate,
@@ -1442,10 +1525,25 @@ def issue_dmvic_certificate(policy_no, quote_row):
         log.info("DMVIC certificate issued for %s: %s",
                   policy_no, result.get('certificate_no'))
     else:
-        query("""UPDATE policies SET dmvic_status='failed', dmvic_error=%s
-                  WHERE policy_no=%s""",
-              (result.get('error', 'Unknown DMVIC error'), policy_no), commit=True)
-        log.warning("DMVIC issuance failed for %s: %s", policy_no, result.get('error'))
+        issuance_request_id = result.get('issuance_request_id')
+        if issuance_request_id:
+            # A request ID means DMVIC held the issuance for a compliance review
+            # (for example, possible double insurance). Keep it pending until an
+            # admin records the required logbook and inspection checks.
+            query("""UPDATE policies
+                      SET dmvic_status='pending_confirmation',
+                          dmvic_issuance_request_id=%s,
+                          dmvic_error=%s
+                      WHERE policy_no=%s""",
+                  (issuance_request_id,
+                   result.get('error', 'Policy alert — awaiting manual confirmation'),
+                   policy_no), commit=True)
+            log.warning("DMVIC policy alert for %s; awaiting admin confirmation", policy_no)
+        else:
+            query("""UPDATE policies SET dmvic_status='failed', dmvic_error=%s
+                      WHERE policy_no=%s""",
+                  (result.get('error', 'Unknown DMVIC error'), policy_no), commit=True)
+            log.warning("DMVIC issuance failed for %s: %s", policy_no, result.get('error'))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3837,9 +3935,10 @@ def policy_dmvic_status(policy_no):
     screen. DMVIC issuance runs on a background worker (see buy_cover()
     above) so the agent isn't blocked waiting on DMVIC's response — the
     frontend polls this every few seconds until dmvic_status settles into
-    'issued' / 'failed' / 'pending_manual' / 'unsupported'."""
+    'issued' / 'failed' / 'pending_manual' / 'pending_confirmation' /
+    'unsupported'."""
     row = query("""SELECT policy_no, agent_id, dmvic_status, dmvic_certificate_no,
-                          dmvic_transaction_no, dmvic_error
+                          dmvic_transaction_no, dmvic_issuance_request_id, dmvic_error
                    FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
     if not row:
         return jsonify({"error": "Policy not found"}), 404
@@ -3851,6 +3950,7 @@ def policy_dmvic_status(policy_no):
         "dmvic_status":    row.get('dmvic_status'),
         "certificate_no":  row.get('dmvic_certificate_no'),
         "transaction_no":  row.get('dmvic_transaction_no'),
+        "issuance_request_id": row.get('dmvic_issuance_request_id'),
         "error":           row.get('dmvic_error'),
     })
 
@@ -4449,6 +4549,98 @@ def mpesa_callback(secret):
 def hmac_compare(a, b):
     import hmac as _hmac
     return _hmac.compare_digest(str(a), str(b))
+
+
+@app.route('/api/admin/dmvic/pending-confirmations')
+@login_required
+@admin_required
+def list_pending_dmvic_confirmations():
+    """Admin review queue for DMVIC policy alerts held with an issuance ID."""
+    policies = query("""SELECT policy_no, quote_id, agent_id, vehicle_reg, total_payable,
+                               dmvic_issuance_request_id, dmvic_error, created_at
+                        FROM policies
+                        WHERE dmvic_status=%s
+                        ORDER BY created_at DESC""", ('pending_confirmation',))
+    pending = []
+    for policy in policies:
+        quote = query("""SELECT policy_holder_name, chassis_number, company
+                         FROM quotations WHERE id=%s""", (policy.get('quote_id'),), fetchone=True) or {}
+        agent = query("SELECT full_name FROM users WHERE id=%s", (policy.get('agent_id'),), fetchone=True) or {}
+        pending.append({
+            "policy_no": policy.get('policy_no'),
+            "vehicle_reg": policy.get('vehicle_reg'),
+            "chassis_number": quote.get('chassis_number'),
+            "policy_holder_name": quote.get('policy_holder_name'),
+            "company": quote.get('company'),
+            "agent_name": agent.get('full_name'),
+            "total_payable": policy.get('total_payable'),
+            "dmvic_error": policy.get('dmvic_error'),
+            "created_at": policy.get('created_at'),
+        })
+    return jsonify({"pending": pending})
+
+
+@app.route('/api/dmvic/confirm-issuance', methods=['POST'])
+@login_required
+@admin_required
+def dmvic_confirm_issuance_route():
+    """Approve or reject a DMVIC policy alert after a genuine manual review."""
+    data = request.get_json() or {}
+    policy_no = (data.get('policy_no') or '').strip()
+    is_approved = bool(data.get('is_approved'))
+    is_logbook_verified = bool(data.get('is_logbook_verified'))
+    is_vehicle_inspected = bool(data.get('is_vehicle_inspected'))
+    additional_comments = (data.get('additional_comments') or '').strip()
+
+    if not policy_no:
+        return jsonify({"error": "policy_no is required"}), 400
+    if is_approved and not (is_logbook_verified and is_vehicle_inspected):
+        return jsonify({"error": "Confirm both the logbook verification and vehicle inspection before approving."}), 400
+
+    policy = query("""SELECT policy_no, dmvic_issuance_request_id, dmvic_status
+                      FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
+    if not policy:
+        return jsonify({"error": "Policy not found"}), 404
+    if policy.get('dmvic_status') != 'pending_confirmation' or not policy.get('dmvic_issuance_request_id'):
+        return jsonify({"error": "This policy has no pending DMVIC issuance confirmation."}), 409
+
+    token = dmvic_get_token()
+    if not token:
+        return jsonify({"error": "Could not obtain a DMVIC auth token"}), 502
+
+    result = dmvic_confirm_certificate_issuance(
+        token,
+        policy['dmvic_issuance_request_id'],
+        is_approved=is_approved,
+        is_logbook_verified=is_logbook_verified,
+        is_vehicle_inspected=is_vehicle_inspected,
+        additional_comments=additional_comments,
+        usernames=session.get('username', ''),
+    )
+
+    if result.get('success'):
+        final_status = 'issued' if is_approved else 'failed'
+        query("""UPDATE policies
+                  SET dmvic_status=%s,
+                      dmvic_transaction_no=%s,
+                      dmvic_certificate_no=%s,
+                      dmvic_api_request_no=%s,
+                      dmvic_issued_at=NOW(),
+                      dmvic_error=NULL
+                  WHERE policy_no=%s""",
+              (final_status, result.get('transaction_no'), result.get('certificate_no'),
+               result.get('api_request_number'), policy_no), commit=True)
+    else:
+        # Network and validation failures remain reviewable and can be retried.
+        query("""UPDATE policies SET dmvic_status='pending_confirmation', dmvic_error=%s
+                  WHERE policy_no=%s""",
+              (result.get('error', 'Confirmation failed'), policy_no), commit=True)
+
+    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+          (session['user_id'], 'dmvic_confirm_issuance',
+           f"policy={policy_no} approved={is_approved} result={'success' if result.get('success') else 'failed'}"),
+          commit=True)
+    return jsonify(result)
 
 
 @app.route('/api/mpesa/status')

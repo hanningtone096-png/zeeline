@@ -119,6 +119,16 @@
             </div>
         </div>
 
+        <div class="section-card">
+            <h3><i class="fas fa-triangle-exclamation" style="color:#dc2626;"></i> DMVIC Policy Alerts</h3>
+            <p style="font-size:13px;color:#64748b;margin-top:-6px;">
+                Certificates held by DMVIC require a documented logbook check and vehicle inspection before approval.
+            </p>
+            <div id="dmvicConfirmationsBox">
+                <p style="color:#94a3b8;font-size:13px;">Loading DMVIC alerts…</p>
+            </div>
+        </div>
+
         <!-- Certificate Declarations -->
         <div class="section-card">
             <h3><i class="fas fa-stamp" style="color:#2563eb;"></i> Certificate Declarations</h3>
@@ -182,6 +192,32 @@
 </main>
 </div>
 
+<!-- DMVIC confirmation modal -->
+<div id="dmvicConfirmModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:8px;max-width:520px;width:92%;padding:22px;">
+        <h3 style="margin-top:0;">Confirm DMVIC Issuance <span id="dmvicModalPolicyNo" style="font-family:monospace;"></span></h3>
+        <p id="dmvicModalReason" style="font-size:13px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;padding:10px 12px;border-radius:8px;"></p>
+        <div style="margin-top:12px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#334155;margin-bottom:10px;">
+                <input type="checkbox" id="dmvicModalLogbook"> I have verified the vehicle logbook
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#334155;">
+                <input type="checkbox" id="dmvicModalInspected"> The vehicle has been physically inspected
+            </label>
+        </div>
+        <label style="font-size:13px;font-weight:600;color:#334155;display:block;margin-top:14px;">Additional comments</label>
+        <textarea id="dmvicModalComments" rows="3" placeholder="Record the checks completed"
+            style="width:100%;margin-top:6px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;box-sizing:border-box;"></textarea>
+        <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+            <button type="button" onclick="closeDmvicConfirmModal()" style="padding:10px 18px;background:#f1f5f9;border:none;border-radius:6px;cursor:pointer;">Cancel</button>
+            <button type="button" onclick="submitDmvicConfirmation(false)" style="padding:10px 18px;background:#f1f5f9;color:#dc2626;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Reject</button>
+            <button type="button" onclick="submitDmvicConfirmation(true)" style="padding:10px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+                <i class="fas fa-check"></i> Approve and issue
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Certificate Declaration send modal -->
 <div id="declarationModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;align-items:center;justify-content:center;">
     <div style="background:#fff;border-radius:12px;max-width:520px;width:92%;padding:22px;">
@@ -227,6 +263,7 @@ async function loadDashboard() {
             loadAgents();
             loadReportSummary();
             loadDeclarations();
+            loadDmvicConfirmations();
         } else {
             renderAgentStats(d);
             document.getElementById('agentSection').style.display = 'block';
@@ -613,6 +650,98 @@ async function checkDoubleInsurance() {
     } catch (err) {
         console.error('Double insurance check failed:', err);
         box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Server communication error. Please try again.</p>';
+    }
+}
+
+// ── DMVIC Policy Alerts ─────────────────────────────────────────────────────
+let dmvicConfirmationPolicyNo = null;
+
+async function loadDmvicConfirmations() {
+    const box = document.getElementById('dmvicConfirmationsBox');
+    try {
+        const res = await fetch('/api/admin/dmvic/pending-confirmations');
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const data = await res.json();
+        const rows = data.pending || [];
+        if (!rows.length) {
+            box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">No DMVIC policy alerts are awaiting confirmation.</p>';
+            return;
+        }
+
+        box.innerHTML = `
+            <div style="overflow-x:auto;">
+                <table class="agent-table">
+                    <thead><tr><th>Policy</th><th>Vehicle</th><th>Insured</th><th>Agent</th><th>Premium</th><th>Reason</th><th></th></tr></thead>
+                    <tbody>${rows.map(row => `
+                        <tr>
+                            <td><span style="font-family:monospace;font-size:12px;">${esc(row.policy_no)}</span></td>
+                            <td>${esc(row.vehicle_reg || '—')}<br><span style="font-size:11px;color:#94a3b8;">${esc(row.chassis_number || '')}</span></td>
+                            <td>${esc(row.policy_holder_name || '—')}</td>
+                            <td>${esc(row.agent_name || '—')}</td>
+                            <td>KES ${Number(row.total_payable || 0).toLocaleString()}</td>
+                            <td style="font-size:12px;color:#991b1b;max-width:260px;">${esc(row.dmvic_error || '—')}</td>
+                            <td><button type="button" class="dmvic-review-button" data-policy="${esc(row.policy_no)}" data-reason="${esc(row.dmvic_error || '')}"
+                                style="padding:6px 14px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Review</button></td>
+                        </tr>`).join('')}</tbody>
+                </table>
+            </div>`;
+        box.querySelectorAll('.dmvic-review-button').forEach(button => {
+            button.addEventListener('click', () => openDmvicConfirmModal(button.dataset.policy, button.dataset.reason));
+        });
+    } catch (err) {
+        console.error('Failed to load DMVIC confirmations:', err);
+        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Failed to load DMVIC policy alerts. Please refresh.</p>';
+    }
+}
+
+function openDmvicConfirmModal(policyNo, reason) {
+    dmvicConfirmationPolicyNo = policyNo;
+    document.getElementById('dmvicModalPolicyNo').innerText = policyNo;
+    document.getElementById('dmvicModalReason').innerText = reason || 'DMVIC requires a manual review before this certificate can be issued.';
+    document.getElementById('dmvicModalLogbook').checked = false;
+    document.getElementById('dmvicModalInspected').checked = false;
+    document.getElementById('dmvicModalComments').value = '';
+    document.getElementById('dmvicConfirmModalOverlay').style.display = 'flex';
+}
+
+function closeDmvicConfirmModal() {
+    document.getElementById('dmvicConfirmModalOverlay').style.display = 'none';
+    dmvicConfirmationPolicyNo = null;
+}
+
+async function submitDmvicConfirmation(isApproved) {
+    const policyNo = dmvicConfirmationPolicyNo;
+    if (!policyNo) return;
+    const logbookVerified = document.getElementById('dmvicModalLogbook').checked;
+    const vehicleInspected = document.getElementById('dmvicModalInspected').checked;
+    const comments = document.getElementById('dmvicModalComments').value.trim();
+    if (isApproved && !(logbookVerified && vehicleInspected)) {
+        alert('Confirm both the logbook verification and the vehicle inspection before approving.');
+        return;
+    }
+    if (!isApproved && !confirm('Reject this DMVIC issuance? The policy will require manual handling.')) return;
+
+    try {
+        const res = await fetch('/api/dmvic/confirm-issuance', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                policy_no: policyNo,
+                is_approved: isApproved,
+                is_logbook_verified: logbookVerified,
+                is_vehicle_inspected: vehicleInspected,
+                additional_comments: comments,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'DMVIC did not accept the confirmation.');
+        if (!data.success) throw new Error(data.error || 'DMVIC did not confirm the issuance.');
+        alert(isApproved ? `Certificate issued${data.certificate_no ? ': ' + data.certificate_no : '.'}` : 'DMVIC issuance rejected.');
+        closeDmvicConfirmModal();
+        loadDmvicConfirmations();
+    } catch (err) {
+        console.error('Failed to submit DMVIC confirmation:', err);
+        alert(err.message || 'Server communication error. Please try again.');
     }
 }
 

@@ -1070,6 +1070,12 @@ function pollDmvicStatus(policyNo) {
                 <span style="font-size:12px;">${esc(statusData.error || 'Needs admin review before DMVIC issuance.')}</span>`;
             return true;
         }
+        if (status === 'pending_confirmation') {
+            box.className = 'dmvic-status-box manual';
+            box.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>DMVIC Policy Alert Awaiting Confirmation</strong><br>
+                <span style="font-size:12px;">${esc(statusData.error || 'An administrator must verify the logbook and vehicle before the certificate can be issued.')}</span>`;
+            return true;
+        }
         if (status === 'unsupported') {
             box.className = 'dmvic-status-box manual';
             box.innerHTML = `<i class="fas fa-info-circle"></i> <strong>DMVIC Issuance Not Applicable</strong><br>
