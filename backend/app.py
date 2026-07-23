@@ -339,6 +339,7 @@ ARCHPAY_BASE_URL        = os.environ.get('ARCHPAY_BASE_URL', 'https://pay.archie
 ARCHPAY_API_KEY         = require_env('ARCHPAY_API_KEY', allow_dev_fallback='')
 ARCHPAY_CHANNEL_ID      = os.environ.get('ARCHPAY_CHANNEL_ID', '').strip()
 ARCHPAY_CALLBACK_SECRET = require_env('ARCHPAY_CALLBACK_SECRET', allow_dev_fallback=os.urandom(16).hex())
+ARCHPAY_WEBHOOK_URL     = os.environ.get('ARCHPAY_WEBHOOK_URL', '').strip()
 
 # Backwards-compatible names for existing routes/templates that still say mpesa.
 MPESA_ENV = ARCHPAY_MODE
@@ -367,6 +368,11 @@ def mpesa_stk_push(phone, amount, account_ref, description='Insurance Premium'):
     }
     if ARCHPAY_CHANNEL_ID:
         payload["channelId"] = ARCHPAY_CHANNEL_ID
+    if ARCHPAY_WEBHOOK_URL:
+        # ArchPay uses this per-request URL for the final M-Pesa result.  A
+        # channel-level default is not reliable when several applications use
+        # the same ArchPay account.
+        payload["callbackUrl"] = ARCHPAY_WEBHOOK_URL
 
     try:
         res  = requests.post(
@@ -413,12 +419,23 @@ def mpesa_query_status(checkout_request_id):
         )
         data = res.json()
         status = (data.get('status') or '').strip().lower()
-        paid = res.ok and data.get('success') and status == 'completed'
+        receipt = data.get('mpesaReceiptNumber')
+        terminal_failures = {'cancelled', 'canceled', 'timeout', 'reversed'}
+        paid = bool(res.ok and (
+            (data.get('success') and status in {'completed', 'success', 'successful', 'paid'})
+            # ArchPay has returned `success: false, status: failed` for
+            # completed collections while still supplying the Safaricom
+            # receipt.  A receipt is the payment proof, except for an explicit
+            # reversal/cancellation/timeout.
+            or (receipt and status not in terminal_failures)
+        ))
+        if paid and receipt and status == 'failed':
+            log.warning("ArchPay verify returned a receipt with failed status; accepting receipt as settled")
         log.info("ArchPay verify status=%s payment_status=%s", res.status_code, status)
         return {
             'success': paid,
             'status': status,
-            'mpesa_receipt_number': data.get('mpesaReceiptNumber'),
+            'mpesa_receipt_number': receipt,
             'amount': data.get('amount'),
             'phone': data.get('phone'),
             'transaction_date': data.get('transactionDate'),
@@ -4394,20 +4411,24 @@ def mpesa_callback(secret):
 
     try:
         data = request.get_json(force=True) or {}
-        ref = (data.get('checkoutRequestId') or '').strip()
-        status = (data.get('status') or '').strip().lower()
+        callback_data = data.get('data') if isinstance(data.get('data'), dict) else data
+        ref = (callback_data.get('checkoutRequestId')
+               or callback_data.get('checkout_request_id')
+               or callback_data.get('CheckoutRequestID')
+               or '').strip()
+        status = (callback_data.get('status') or '').strip().lower()
+        receipt = callback_data.get('mpesaReceiptNumber')
         if not ref:
             return jsonify({"received": False, "error": "Missing checkoutRequestId"}), 400
-        if data.get('event') and data.get('event') != 'payment.callback':
-            return jsonify({"received": False, "error": "Unsupported event"}), 400
 
         pmt = query("SELECT policy_no FROM payments WHERE reference=%s", (ref,), fetchone=True)
         if not pmt:
             log.warning("ArchPay callback ignored: unknown checkoutRequestId=%s", ref)
             return jsonify({"received": True})
 
-        if status == 'completed':
-            mpesa_ref = data.get('mpesaReceiptNumber') or ref
+        terminal_failures = ('cancelled', 'canceled', 'timeout', 'reversed')
+        if status in ('completed', 'success', 'successful', 'paid') or (receipt and status not in terminal_failures):
+            mpesa_ref = receipt or ref
             query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
                   (ref,), commit=True)
             query("UPDATE policies SET status='active', updated_at=NOW() WHERE policy_no=%s",
