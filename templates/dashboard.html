@@ -127,6 +127,19 @@
             <div id="dmvicConfirmationsBox">
                 <p style="color:#94a3b8;font-size:13px;">Loading DMVIC alerts…</p>
             </div>
+            <details style="margin-top:14px;">
+                <summary style="cursor:pointer;color:#1d4ed8;font-size:13px;font-weight:600;">Record a policy-alert ID supplied by DMVIC Support</summary>
+                <p style="font-size:12px;color:#64748b;margin:10px 0;">Use this only when Support has supplied an Issuance Request ID after the original issuance attempt.</p>
+                <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;">
+                    <label style="font-size:12px;color:#334155;font-weight:600;">Policy number
+                        <input id="dmvicSupportPolicyNo" type="text" placeholder="POL-..." style="display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
+                    </label>
+                    <label style="font-size:12px;color:#334155;font-weight:600;">Issuance Request ID
+                        <input id="dmvicSupportRequestId" type="text" placeholder="AF-..." style="display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
+                    </label>
+                    <button type="button" onclick="recordDmvicSupportAlert()" style="padding:9px 13px;background:#1d4ed8;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600;">Add to queue</button>
+                </div>
+            </details>
         </div>
 
         <!-- Certificate Declarations -->
@@ -741,6 +754,31 @@ async function submitDmvicConfirmation(isApproved) {
         loadDmvicConfirmations();
     } catch (err) {
         console.error('Failed to submit DMVIC confirmation:', err);
+        alert(err.message || 'Server communication error. Please try again.');
+    }
+}
+
+async function recordDmvicSupportAlert() {
+    const policyNo = document.getElementById('dmvicSupportPolicyNo').value.trim();
+    const issuanceRequestId = document.getElementById('dmvicSupportRequestId').value.trim();
+    if (!policyNo || !issuanceRequestId) {
+        alert('Enter both the policy number and the Issuance Request ID from DMVIC Support.');
+        return;
+    }
+    try {
+        const res = await fetch('/api/dmvic/record-policy-alert', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ policy_no: policyNo, issuance_request_id: issuanceRequestId }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not record the DMVIC policy alert.');
+        document.getElementById('dmvicSupportPolicyNo').value = '';
+        document.getElementById('dmvicSupportRequestId').value = '';
+        alert(data.message || 'DMVIC alert added to the confirmation queue.');
+        loadDmvicConfirmations();
+    } catch (err) {
+        console.error('Failed to record DMVIC policy alert:', err);
         alert(err.message || 'Server communication error. Please try again.');
     }
 }

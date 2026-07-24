@@ -4882,6 +4882,41 @@ def dmvic_confirm_issuance_route():
     return jsonify(result)
 
 
+@app.route('/api/dmvic/record-policy-alert', methods=['POST'])
+@login_required
+@admin_required
+def record_dmvic_policy_alert():
+    """Queue an alert ID supplied by DMVIC Support for the normal review flow."""
+    data = request.get_json() or {}
+    policy_no = (data.get('policy_no') or '').strip()
+    issuance_request_id = (data.get('issuance_request_id') or '').strip()
+
+    if not policy_no:
+        return jsonify({"error": "policy_no is required"}), 400
+    if not re.fullmatch(r"[A-Za-z0-9-]{3,80}", issuance_request_id):
+        return jsonify({"error": "Enter the Issuance Request ID supplied by DMVIC Support."}), 400
+
+    policy = query("SELECT policy_no, dmvic_status FROM policies WHERE policy_no=%s",
+                   (policy_no,), fetchone=True)
+    if not policy:
+        return jsonify({"error": "Policy not found"}), 404
+    if policy.get('dmvic_status') == 'issued':
+        return jsonify({"error": "This policy already has an issued DMVIC certificate."}), 409
+
+    reason = ("DMVIC policy alert recorded from Support. Review the logbook and "
+              "vehicle inspection, then approve confirmation to issue the certificate.")
+    query("""UPDATE policies
+             SET dmvic_status='pending_confirmation',
+                 dmvic_issuance_request_id=%s,
+                 dmvic_error=%s
+             WHERE policy_no=%s""",
+          (issuance_request_id, reason, policy_no), commit=True)
+    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+          (session['user_id'], 'dmvic_record_policy_alert',
+           f"policy={policy_no} issuance_request_id={issuance_request_id}"), commit=True)
+    return jsonify({"success": True, "message": "DMVIC alert added to the confirmation queue."})
+
+
 @app.route('/api/mpesa/status')
 @login_required
 def mpesa_config_status():
