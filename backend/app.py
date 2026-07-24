@@ -3322,6 +3322,8 @@ def api_login():
         return jsonify({
             "error": "Please verify your email before logging in.",
             "require_verification": True,
+            "user_id": user['id'],
+            "email": user.get('email', ''),
         }), 403
 
     session.clear()
@@ -3426,9 +3428,18 @@ def api_verify_email():
     d       = request.get_json() or {}
     code    = d.get('code', '').strip()
     user_id = session.get('unverified_user_id') or d.get('user_id')
+    email   = d.get('email', '').strip().lower()
+
+    # The agent may open the code on another device/browser, where the
+    # pending-registration session is unavailable. The OTP still protects the
+    # action, so resolve a matching unverified account by its registered email.
+    if not user_id and email:
+        pending_user = query("SELECT id FROM users WHERE email=%s AND status='unverified'",
+                             (email,), fetchone=True)
+        user_id = pending_user.get('id') if pending_user else None
 
     if not user_id:
-        return jsonify({"error": "No pending verification. Please register or log in again."}), 400
+        return jsonify({"error": "Enter the email used for registration, then try the verification code again."}), 400
     if not code:
         return jsonify({"error": "Please enter the verification code."}), 400
 
@@ -3461,8 +3472,13 @@ def api_verify_email():
 def resend_verification_otp():
     d       = request.get_json() or {}
     user_id = session.get('unverified_user_id') or d.get('user_id')
+    email   = d.get('email', '').strip().lower()
+    if not user_id and email:
+        pending_user = query("SELECT id FROM users WHERE email=%s AND status='unverified'",
+                             (email,), fetchone=True)
+        user_id = pending_user.get('id') if pending_user else None
     if not user_id:
-        return jsonify({"error": "No pending verification. Please register again."}), 400
+        return jsonify({"error": "Enter the email used for registration to request a new code."}), 400
 
     user = query("SELECT * FROM users WHERE id=%s AND status='unverified'",
                  (user_id,), fetchone=True)

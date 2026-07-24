@@ -361,6 +361,13 @@ body {
                 We sent a 6-digit verification code to your email. Enter it below to complete your registration.
             </p>
             <div class="form-group">
+                <label>Registration Email</label>
+                <div class="input-wrap">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email" id="v_email" placeholder="you@example.com" autocomplete="email">
+                </div>
+            </div>
+            <div class="form-group">
                 <label>Verification Code</label>
                 <div class="input-wrap">
                     <i class="fas fa-key"></i>
@@ -526,6 +533,8 @@ async function login() {
         if (!res.ok) {
             if (data.require_verification) {
                 currentView = 'otp';
+                document.getElementById('v_user_id').value = data.user_id || '';
+                document.getElementById('v_email').value = data.email || '';
                 updateUI();
                 showMsg('success', 'Enter the verification code sent to your email.');
                 return;
@@ -594,6 +603,7 @@ async function register() {
         
         // Save the dynamic user ID returned from your register endpoint
         document.getElementById('v_user_id').value = data.user_id;
+        document.getElementById('v_email').value = payload.email;
 
         // Clear out registration input boxes
         ['r_full_name','r_username','r_email','r_phone','r_id_number','r_kra_pin','r_ira_number',
@@ -622,8 +632,9 @@ async function verifyOtp() {
     const btn = document.getElementById('otpBtn');
     const code = document.getElementById('v_code').value.trim();
     const user_id = document.getElementById('v_user_id').value;
+    const email = document.getElementById('v_email').value.trim();
 
-    if (!code) { showMsg('error', 'Please enter your verification code.'); return; }
+    if (!code || !email) { showMsg('error', 'Enter your registration email and verification code.'); return; }
 
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying…';
@@ -632,7 +643,7 @@ async function verifyOtp() {
         const res = await fetch('/api/verify-email', {
             method: 'POST',
             headers: withCsrf({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ user_id, code })
+            body: JSON.stringify({ user_id, email, code })
         });
         const data = await res.json();
 
@@ -651,7 +662,7 @@ async function verifyOtp() {
         }, 3500);
 
     } catch {
-        showMsg('error', 'UNDER MAINTENANCE-THANKYOU FOR YOUR PATIENCE.');
+        showMsg('error', 'Could not contact the server. Please try again.');
     } finally {
         btn.disabled = false;
         btn.innerHTML = 'Verify Code <i class="fas fa-check"></i>';
@@ -661,11 +672,12 @@ async function verifyOtp() {
 async function resendVerificationOtp() {
     clearMsg();
     const user_id = document.getElementById('v_user_id').value;
+    const email = document.getElementById('v_email').value.trim();
     try {
         const res = await fetch('/api/verify-email/resend', {
             method: 'POST',
             headers: withCsrf({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ user_id })
+            body: JSON.stringify({ user_id, email })
         });
         const data = await res.json();
         showMsg(res.ok ? 'success' : 'error', data.message || data.error || 'Could not resend the code.');
