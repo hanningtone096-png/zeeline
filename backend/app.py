@@ -32,7 +32,7 @@ from functools import wraps
 from flask import (Flask, render_template, request, jsonify, Response,
                    session, redirect, send_file, abort)
 from flask_cors import CORS
-from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
 from mongo_store import MongoStore
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -156,6 +156,11 @@ CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 # WITHOUT this block, every page render raises
 # jinja2.exceptions.UndefinedError: 'csrf_token' is undefined.
 csrf = CSRFProtect(app)
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(error):
+    return jsonify({"error": "Your form session expired. Refresh the page and try again."}), 400
 
 @app.context_processor
 def inject_csrf_token():
@@ -1761,6 +1766,14 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
+
+def clear_session_preserving_csrf():
+    """Rotate application session state without invalidating the page's CSRF form token."""
+    csrf_token = session.get('csrf_token')
+    session.clear()
+    if csrf_token:
+        session['csrf_token'] = csrf_token
+
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -3317,7 +3330,7 @@ def api_login():
         return jsonify({"error": "Invalid username or password"}), 401
 
     if user['status'] == 'unverified':
-        session.clear()
+        clear_session_preserving_csrf()
         session['unverified_user_id'] = user['id']
         return jsonify({
             "error": "Please verify your email before logging in.",
@@ -3411,7 +3424,7 @@ def register():
     enqueue("send_verification_otp", create_and_send_verification_otp,
             user_id, email, full_name)
 
-    session.clear()
+    clear_session_preserving_csrf()
     session['unverified_user_id'] = user_id
 
     return jsonify({
