@@ -173,6 +173,9 @@ class MongoStore:
             self._collection(table).create_index([("id", ASCENDING)], unique=True)
         self.db.users.create_index([("username", ASCENDING)], unique=True)
         self.db.users.create_index([("email", ASCENDING)], sparse=True)
+        self.db.verification_codes.create_index([
+            ("user_id", ASCENDING), ("purpose", ASCENDING), ("created_at", DESCENDING),
+        ])
         self.db.clients.create_index([("agent_id", ASCENDING), ("phone", ASCENDING)])
         self.db.quotations.create_index([("id", ASCENDING)], unique=True)
         self.db.quotations.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])

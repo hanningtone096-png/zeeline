@@ -1,4 +1,4 @@
-import os, io, uuid, logging, smtplib, json, base64, time, threading, queue, hashlib, functools, random, ipaddress
+import os, io, uuid, logging, smtplib, json, base64, time, threading, queue, hashlib, functools, random, ipaddress, re
 import requests
 
 # ── Base Directory setup (resolves paths absolute to app.py) ──────────────────
@@ -29,7 +29,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from functools import wraps
 
-from flask import (Flask, render_template, request, jsonify,
+from flask import (Flask, render_template, request, jsonify, Response,
                    session, redirect, send_file, abort)
 from flask_cors import CORS
 from flask_wtf.csrf import CSRFProtect, generate_csrf
@@ -325,9 +325,15 @@ SMTP_EMAIL    = os.environ.get('SMTP_EMAIL', '')
 SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')
 SMTP_HOST     = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
 SMTP_PORT     = int(os.environ.get('SMTP_PORT', 587))
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '').strip()
+BREVO_SENDER_EMAIL = os.environ.get('BREVO_SENDER_EMAIL', 'noreply@zeelineinsurance.tech').strip()
+BREVO_SENDER_NAME = os.environ.get('BREVO_SENDER_NAME', 'Zee Line Risk Solutions').strip()
+BREVO_VERIFICATION_TEMPLATE_ID = os.environ.get('BREVO_VERIFICATION_TEMPLATE_ID', '').strip()
+BREVO_PASSWORD_RESET_TEMPLATE_ID = os.environ.get('BREVO_PASSWORD_RESET_TEMPLATE_ID', '').strip()
+PUBLIC_SITE_URL = os.environ.get('PUBLIC_SITE_URL', 'https://zeelineinsurance.tech').rstrip('/')
 
-if IS_PRODUCTION and (not SMTP_EMAIL or not SMTP_PASSWORD):
-    log.warning("SMTP_EMAIL/SMTP_PASSWORD not set in production — outbound email is disabled.")
+if IS_PRODUCTION and not BREVO_API_KEY and (not SMTP_EMAIL or not SMTP_PASSWORD):
+    log.warning("No Brevo or SMTP credentials are configured — outbound email is disabled.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -447,7 +453,54 @@ def mpesa_query_status(checkout_request_id):
         return {'success': False, 'error': 'Could not verify payment status. Please try again.'}
 
 
+def send_brevo_email(to, subject=None, html_body=None, attachments=None, *, template_id=None, params=None, tags=None):
+    """Send transactional mail through Brevo's HTTPS API without exposing credentials in logs."""
+    if not BREVO_API_KEY:
+        return False
+
+    payload = {
+        "sender": {"email": BREVO_SENDER_EMAIL, "name": BREVO_SENDER_NAME},
+        "to": [{"email": to}],
+    }
+    if template_id:
+        try:
+            payload["templateId"] = int(template_id)
+        except (TypeError, ValueError):
+            log.error("Brevo template ID is invalid")
+            return False
+        payload["params"] = params or {}
+    else:
+        payload["subject"] = subject
+        payload["htmlContent"] = html_body
+    if tags:
+        payload["tags"] = tags
+    if attachments:
+        payload["attachment"] = [
+            {"name": filename, "content": base64.b64encode(content).decode("ascii")}
+            for filename, content in attachments
+        ]
+
+    try:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            json=payload,
+            headers={"api-key": BREVO_API_KEY, "Content-Type": "application/json"},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        log.error("Brevo email request failed: %s", type(exc).__name__)
+        return False
+
+    if response.ok:
+        log.info("Brevo transactional email accepted for delivery")
+        return True
+    log.error("Brevo email rejected with HTTP %s", response.status_code)
+    return False
+
+
 def send_email(to, subject, html_body, attachments=None):
+    if BREVO_API_KEY:
+        return send_brevo_email(to, subject, html_body, attachments)
     if not SMTP_EMAIL or not SMTP_PASSWORD:
         log.warning("SMTP not configured — email not sent")
         return False
@@ -1560,40 +1613,88 @@ def generate_otp():
     return f"{random.SystemRandom().randint(0, 10**OTP_LENGTH - 1):0{OTP_LENGTH}d}"
 
 
-def create_and_send_verification_otp(user_id, email, full_name):
+def otp_email_content(full_name, code, purpose):
+    recipient_name = full_name or "there"
+    if purpose == 'password_reset':
+        return (
+            "Reset your password — Zee Line Risk Solutions",
+            f"""
+            <h2>Zee Line Risk Solutions — Reset Your Password</h2>
+            <p>Hi {recipient_name},</p>
+            <p>Use the code below to reset your password:</p>
+            <h1 style=\"letter-spacing:6px;font-size:32px;\">{code}</h1>
+            <p>This code expires in {OTP_EXPIRY_MINUTES} minutes. If you did not request a password reset, you can safely ignore this email.</p>
+            """,
+        )
+    return (
+        "Verify your email — Zee Line Risk Solutions",
+        f"""
+        <h2>Zee Line Risk Solutions — Verify Your Email</h2>
+        <p>Hi {recipient_name},</p>
+        <p>Thanks for registering as an agent. Use the code below to verify your email address:</p>
+        <h1 style=\"letter-spacing:6px;font-size:32px;\">{code}</h1>
+        <p>This code expires in {OTP_EXPIRY_MINUTES} minutes. If you did not request this, you can safely ignore this email.</p>
+        """,
+    )
+
+
+def send_otp_email(email, full_name, code, purpose):
+    subject, html = otp_email_content(full_name, code, purpose)
+    template_id = (
+        BREVO_PASSWORD_RESET_TEMPLATE_ID
+        if purpose == 'password_reset'
+        else BREVO_VERIFICATION_TEMPLATE_ID
+    )
+    if BREVO_API_KEY and template_id:
+        return send_brevo_email(
+            email,
+            template_id=template_id,
+            params={
+                "NAME": full_name or "there",
+                "OTP": code,
+                "EXPIRES_MINUTES": OTP_EXPIRY_MINUTES,
+            },
+            tags=[f"otp-{purpose}"],
+        )
+    return send_email(email, subject, html)
+
+
+def create_and_send_otp(user_id, email, full_name, purpose):
     code    = generate_otp()
     expires = datetime.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
 
     query("""UPDATE verification_codes
              SET used=1
-             WHERE user_id=%s AND purpose='register' AND used=0""",
-          (user_id,), commit=True)
+             WHERE user_id=%s AND purpose=%s AND used=0""",
+          (user_id, purpose), commit=True)
 
     query("""INSERT INTO verification_codes
-                (user_id, code, purpose, expires_at, attempts)
-             VALUES (%s,%s,'register',%s,0)""",
-          (user_id, code, expires), commit=True)
+             (user_id, code, purpose, expires_at, attempts)
+             VALUES (%s,%s,%s,%s,0)""",
+          (user_id, code, purpose, expires), commit=True)
 
-    html = f"""
-    <h2>Westlake Insurance — Verify Your Email</h2>
-    <p>Hi {full_name},</p>
-    <p>Thanks for registering as an agent. Use the code below to verify your
-       email address and continue your registration:</p>
-    <h1 style="letter-spacing:6px;font-size:32px;">{code}</h1>
-    <p>This code expires in {OTP_EXPIRY_MINUTES} minutes. If you didn't
-       request this, you can safely ignore this email.</p>
-    """
-    send_email(email, "Verify your email — Westlake Insurance", html)
-    log.info("Verification OTP sent (user_id=%s)", user_id)
+    if not send_otp_email(email, full_name, code, purpose):
+        log.error("OTP email delivery request failed (user_id=%s, purpose=%s)", user_id, purpose)
+        return False
+    log.info("OTP email accepted for delivery (user_id=%s, purpose=%s)", user_id, purpose)
+    return True
 
 
-def verify_registration_otp(user_id, submitted_code):
+def create_and_send_verification_otp(user_id, email, full_name):
+    return create_and_send_otp(user_id, email, full_name, 'register')
+
+
+def create_and_send_password_reset_otp(user_id, email, full_name):
+    return create_and_send_otp(user_id, email, full_name, 'password_reset')
+
+
+def verify_otp(user_id, submitted_code, purpose):
     row = query("""SELECT * FROM verification_codes
-                    WHERE user_id=%s AND purpose='register' AND used=0
+                    WHERE user_id=%s AND purpose=%s AND used=0
                     ORDER BY created_at DESC LIMIT 1""",
-                (user_id,), fetchone=True)
+                (user_id, purpose), fetchone=True)
     if not row:
-        return False, "No pending verification code. Please request a new one."
+        return False, "No pending code. Please request a new one."
 
     if datetime.now() > row['expires_at']:
         return False, "That code has expired. Please request a new one."
@@ -1603,14 +1704,18 @@ def verify_registration_otp(user_id, submitted_code):
         return False, "Too many incorrect attempts. Please request a new code."
 
     import hmac
-    if not hmac.compare_digest(row['code'], submitted_code.strip()):
+    if not hmac.compare_digest(str(row['code']), submitted_code.strip()):
         query("UPDATE verification_codes SET attempts=attempts+1 WHERE id=%s",
               (row['id'],), commit=True)
         remaining = OTP_MAX_ATTEMPTS - (row['attempts'] + 1)
         return False, f"Incorrect code. {max(remaining,0)} attempt(s) remaining."
 
     query("UPDATE verification_codes SET used=1 WHERE id=%s", (row['id'],), commit=True)
-    return True, "Email verified."
+    return True, "Code verified."
+
+
+def verify_registration_otp(user_id, submitted_code):
+    return verify_otp(user_id, submitted_code, 'register')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3067,7 +3172,41 @@ def declarations_history():
 
 @app.route('/')
 def index():
-    return redirect('/dashboard' if 'user_id' in session else '/login')
+    if 'user_id' in session:
+        return redirect('/dashboard')
+    return render_template('home.html', site_url=PUBLIC_SITE_URL)
+
+
+@app.route('/robots.txt')
+def robots_txt():
+    body = "\n".join([
+        "User-agent: *",
+        "Allow: /",
+        "Disallow: /api/",
+        "Disallow: /dashboard",
+        "Disallow: /quotation",
+        "Disallow: /clients",
+        "Disallow: /claims",
+        "Disallow: /renewals",
+        "Disallow: /pending",
+        "Disallow: /login",
+        f"Sitemap: {PUBLIC_SITE_URL}/sitemap.xml",
+        "",
+    ])
+    return Response(body, content_type='text/plain; charset=utf-8')
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    pages = ('/', '/privacy', '/terms')
+    entries = ''.join(
+        f"<url><loc>{PUBLIC_SITE_URL}{path}</loc></url>"
+        for path in pages
+    )
+    body = ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            f'{entries}</urlset>')
+    return Response(body, content_type='application/xml; charset=utf-8')
 
 @app.route('/login')
 def login_page():
@@ -3109,12 +3248,10 @@ def renewals_page():
     return render_template('renewals.html')
 
 @app.route('/terms')
-@login_required
 def terms_page():
     return render_template('terms.html')
 
 @app.route('/privacy')
-@login_required
 def privacy_page():
     return render_template('privacy.html')
 
@@ -3188,7 +3325,7 @@ def register():
     d                 = request.get_json() or {}
     full_name         = d.get('full_name', '').strip()
     username          = d.get('username', '').strip()
-    email             = d.get('email', '').strip()
+    email             = d.get('email', '').strip().lower()
     phone             = d.get('phone', '').strip()
     id_number         = d.get('id_number', '').strip()
     kra_pin           = d.get('kra_pin', '').strip().upper()
@@ -3308,6 +3445,70 @@ def resend_verification_otp():
             user_id, user['email'], user['full_name'])
 
     return jsonify({"success": True, "message": "A new verification code has been sent."})
+
+
+def valid_email_address(value):
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value or ""))
+
+
+@app.route('/api/password-reset/request', methods=['POST'])
+@limiter.limit("3 per minute")
+def request_password_reset():
+    """Start a password reset without revealing whether an email has an account."""
+    d = request.get_json() or {}
+    email = d.get('email', '').strip().lower()
+    message = "If an account matches that email, a password-reset code has been sent."
+    if not valid_email_address(email):
+        return jsonify({"success": True, "message": message})
+
+    user = query("SELECT * FROM users WHERE email=%s", (email,), fetchone=True)
+    if not user:
+        return jsonify({"success": True, "message": message})
+
+    last = query("""SELECT created_at FROM verification_codes
+                     WHERE user_id=%s AND purpose='password_reset'
+                     ORDER BY created_at DESC LIMIT 1""",
+                 (user['id'],), fetchone=True)
+    if last:
+        elapsed = (datetime.now() - last['created_at']).total_seconds()
+        if elapsed < OTP_RESEND_COOLDOWN:
+            return jsonify({"success": True, "message": message})
+
+    enqueue("send_password_reset_otp", create_and_send_password_reset_otp,
+            user['id'], user['email'], user.get('full_name', ''))
+    return jsonify({"success": True, "message": message})
+
+
+@app.route('/api/password-reset/confirm', methods=['POST'])
+@limiter.limit("10 per minute")
+def confirm_password_reset():
+    d = request.get_json() or {}
+    email = d.get('email', '').strip().lower()
+    code = d.get('code', '').strip()
+    password = d.get('password', '')
+    confirm_password = d.get('confirm_password', '')
+
+    if not valid_email_address(email) or not code:
+        return jsonify({"error": "Enter your email address and verification code."}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters long."}), 400
+    if password != confirm_password:
+        return jsonify({"error": "Passwords do not match."}), 400
+
+    user = query("SELECT * FROM users WHERE email=%s", (email,), fetchone=True)
+    if not user:
+        return jsonify({"error": "The reset code is invalid or has expired."}), 400
+
+    ok, message = verify_otp(user['id'], code, 'password_reset')
+    if not ok:
+        return jsonify({"error": message}), 400
+
+    query("UPDATE users SET password_hash=%s WHERE id=%s",
+          (generate_password_hash(password), user['id']), commit=True)
+    query("INSERT INTO audit_log (user_id, action) VALUES (%s, %s)",
+          (user['id'], 'password_reset'), commit=True)
+    session.clear()
+    return jsonify({"success": True, "message": "Password reset. You can now sign in."})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
