@@ -786,6 +786,35 @@ def dmvic_issue_with_retry(issue_fn, token, **kwargs):
     return issue_fn(fresh_token, **kwargs) if fresh_token else result
 
 
+def dmvic_issuance_request_id(response_data):
+    """Find a DMVIC policy-alert request ID regardless of response nesting.
+
+    DMVIC Support confirmed on 2026-07-24 that a policy alert must be completed
+    through /api/v6/Integration/ConfirmCertificateIssuance with the exact
+    IssuanceRequestID produced by the original issuance request. Their alert
+    payloads are not consistently top-level, so do not discard an alert merely
+    because the ID is nested under a callback or error object.
+    """
+    def walk(value):
+        if isinstance(value, dict):
+            for key, candidate in value.items():
+                normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                if normalized == 'issuancerequestid' and candidate:
+                    return str(candidate).strip()
+            for candidate in value.values():
+                found = walk(candidate)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for candidate in value:
+                found = walk(candidate)
+                if found:
+                    return found
+        return None
+
+    return walk(response_data)
+
+
 def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approved,
                                         is_logbook_verified, is_vehicle_inspected,
                                         additional_comments='', usernames=''):
@@ -926,7 +955,7 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
-        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
+        "issuance_request_id": dmvic_issuance_request_id(data),
     }
 
 
@@ -1022,7 +1051,7 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
-        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
+        "issuance_request_id": dmvic_issuance_request_id(data),
     }
 
 
@@ -1111,7 +1140,7 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
-        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
+        "issuance_request_id": dmvic_issuance_request_id(data),
     }
 
 
@@ -1218,7 +1247,7 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
         "success": False,
         "error": "; ".join(messages) or "Certificate issuance failed.",
         "error_codes": [e.get("code") or e.get("errorCode") for e in errors],
-        "issuance_request_id": data.get("IssuanceRequestID") or data.get("IssuanceRequestId") or data.get("issuanceRequestId"),
+        "issuance_request_id": dmvic_issuance_request_id(data),
     }
 
 
@@ -3207,6 +3236,15 @@ def sitemap_xml():
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
             f'{entries}</urlset>')
     return Response(body, content_type='application/xml; charset=utf-8')
+
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_file(
+        os.path.join(BASE_DIR, '..', 'css', 'images', 'favicon.ico'),
+        mimetype='image/vnd.microsoft.icon',
+        max_age=60 * 60 * 24 * 30,
+    )
 
 @app.route('/login')
 def login_page():
