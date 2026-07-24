@@ -112,6 +112,13 @@
 .dmvic-status-box.issued  { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
 .dmvic-status-box.failed  { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; }
 .dmvic-status-box.manual  { background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; }
+
+.dmvic-confirm-overlay { display:none; position:fixed; inset:0; z-index:1200; background:rgba(15,23,42,.58); align-items:center; justify-content:center; padding:20px; }
+.dmvic-confirm-dialog { width:min(100%,520px); background:#fff; border-radius:8px; padding:22px; box-shadow:0 20px 50px rgba(15,23,42,.28); }
+.dmvic-confirm-dialog h3 { margin:0 0 8px; color:#1e293b; font-size:18px; }
+.dmvic-confirm-reason { margin:12px 0; padding:10px 12px; border:1px solid #fecaca; border-radius:6px; background:#fef2f2; color:#991b1b; font-size:13px; line-height:1.45; }
+.dmvic-confirm-check { display:flex; align-items:flex-start; gap:8px; margin:10px 0; color:#334155; font-size:13px; font-weight:600; }
+.dmvic-confirm-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:16px; }
 </style>
 </head>
 
@@ -125,6 +132,30 @@
     <button class="logout-btn" onclick="logout()" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
         <i class="fas fa-sign-out-alt"></i>
     </button>
+</div>
+
+<div id="dmvicConfirmOverlay" class="dmvic-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="dmvicConfirmTitle">
+    <div class="dmvic-confirm-dialog">
+        <h3 id="dmvicConfirmTitle">Confirm DMVIC Issuance</h3>
+        <div id="dmvicConfirmPolicyNo" style="font-family:monospace;font-size:13px;color:#475569;"></div>
+        <p id="dmvicConfirmReason" class="dmvic-confirm-reason"></p>
+        <label class="dmvic-confirm-check">
+            <input id="dmvicConfirmLogbook" type="checkbox"> I have verified the logbook for this vehicle
+        </label>
+        <label class="dmvic-confirm-check">
+            <input id="dmvicConfirmInspection" type="checkbox"> The vehicle has been physically inspected
+        </label>
+        <div class="form-group" style="margin-top:14px;">
+            <label for="dmvicConfirmComments">Additional comments <span style="font-weight:400;">(optional)</span></label>
+            <textarea id="dmvicConfirmComments" rows="3" placeholder="Record the checks completed"></textarea>
+        </div>
+        <div id="dmvicConfirmMessage" style="min-height:18px;font-size:13px;"></div>
+        <div class="dmvic-confirm-actions">
+            <button type="button" class="secondary-btn" onclick="closeQuotationDmvicConfirmation()">Cancel</button>
+            <button type="button" class="secondary-btn" style="color:#b91c1c;" onclick="submitQuotationDmvicConfirmation(false)">Reject</button>
+            <button type="button" class="buy-cover-btn" style="margin-top:0;padding:10px 16px;font-size:14px;" id="dmvicConfirmApproveBtn" onclick="submitQuotationDmvicConfirmation(true)">Approve &amp; Issue</button>
+        </div>
+    </div>
 </div>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
@@ -1073,7 +1104,8 @@ function pollDmvicStatus(policyNo) {
         if (status === 'pending_confirmation') {
             box.className = 'dmvic-status-box manual';
             box.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>DMVIC Policy Alert Awaiting Confirmation</strong><br>
-                <span style="font-size:12px;">${esc(statusData.error || 'An administrator must verify the logbook and vehicle before the certificate can be issued.')}</span>`;
+                <span style="font-size:12px;">${esc(statusData.error || 'Verify the logbook and vehicle inspection before the certificate can be issued.')}</span>`;
+            showQuotationDmvicConfirmation(statusData);
             return true;
         }
         if (status === 'unsupported') {
@@ -1103,6 +1135,84 @@ function pollDmvicStatus(policyNo) {
                 <a href="/renewals" style="color:#1d4ed8;">Renewals</a> shortly for the final certificate status.`;
         }
     }, 3000);
+}
+
+let quotationDmvicPolicyNo = null;
+
+function showQuotationDmvicConfirmation(statusData) {
+    quotationDmvicPolicyNo = statusData.policy_no;
+    document.getElementById('dmvicConfirmPolicyNo').innerText = statusData.policy_no || '';
+    document.getElementById('dmvicConfirmReason').innerText = statusData.error ||
+        'DMVIC requires confirmation before this certificate can be issued.';
+    document.getElementById('dmvicConfirmLogbook').checked = false;
+    document.getElementById('dmvicConfirmInspection').checked = false;
+    document.getElementById('dmvicConfirmComments').value = '';
+    const message = document.getElementById('dmvicConfirmMessage');
+    message.innerText = '';
+    message.style.color = '';
+    document.getElementById('dmvicConfirmApproveBtn').disabled = false;
+    document.getElementById('dmvicConfirmOverlay').style.display = 'flex';
+}
+
+function closeQuotationDmvicConfirmation() {
+    document.getElementById('dmvicConfirmOverlay').style.display = 'none';
+    quotationDmvicPolicyNo = null;
+}
+
+function renderQuotationDmvicResult(result, approved) {
+    const box = document.getElementById('dmvicStatusBox');
+    if (!box) return;
+    if (approved) {
+        box.className = 'dmvic-status-box issued';
+        box.innerHTML = `<i class="fas fa-certificate"></i> <strong>DMVIC Certificate Issued</strong><br>
+            <span style="font-family:monospace;">${esc(result.certificate_no || '')}</span>`;
+        return;
+    }
+    box.className = 'dmvic-status-box failed';
+    box.innerHTML = `<i class="fas fa-times-circle"></i> <strong>DMVIC Issuance Rejected</strong><br>
+        <span style="font-size:12px;">The certificate requires manual handling.</span>`;
+}
+
+async function submitQuotationDmvicConfirmation(isApproved) {
+    if (!quotationDmvicPolicyNo) return;
+
+    const logbookVerified = document.getElementById('dmvicConfirmLogbook').checked;
+    const vehicleInspected = document.getElementById('dmvicConfirmInspection').checked;
+    const comments = document.getElementById('dmvicConfirmComments').value.trim();
+    const message = document.getElementById('dmvicConfirmMessage');
+    const approveButton = document.getElementById('dmvicConfirmApproveBtn');
+
+    if (isApproved && !(logbookVerified && vehicleInspected)) {
+        message.style.color = '#b91c1c';
+        message.innerText = 'Confirm both the logbook verification and vehicle inspection before issuing.';
+        return;
+    }
+
+    message.innerText = '';
+    approveButton.disabled = true;
+    try {
+        const res = await fetch('/api/dmvic/confirm-issuance', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                policy_no: quotationDmvicPolicyNo,
+                is_approved: isApproved,
+                is_logbook_verified: logbookVerified,
+                is_vehicle_inspected: vehicleInspected,
+                additional_comments: comments,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || 'DMVIC did not accept the confirmation.');
+        }
+        renderQuotationDmvicResult(data, isApproved);
+        closeQuotationDmvicConfirmation();
+    } catch (error) {
+        message.style.color = '#b91c1c';
+        message.innerText = error.message || 'Could not submit the DMVIC confirmation.';
+        approveButton.disabled = false;
+    }
 }
 
 async function initiateMpesa(policyNo, amount) {

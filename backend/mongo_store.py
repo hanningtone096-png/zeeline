@@ -176,6 +176,12 @@ class MongoStore:
         self.db.verification_codes.create_index([
             ("user_id", ASCENDING), ("purpose", ASCENDING), ("created_at", DESCENDING),
         ])
+        # OTP writes used to omit this field, while reads correctly filtered on
+        # used=0. Backfill those documents once on startup and make the default
+        # explicit so registration and password-reset codes remain readable.
+        self.db.verification_codes.update_many(
+            {"used": {"$exists": False}}, {"$set": {"used": 0}}
+        )
         self.db.clients.create_index([("agent_id", ASCENDING), ("phone", ASCENDING)])
         self.db.quotations.create_index([("id", ASCENDING)], unique=True)
         self.db.quotations.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])
@@ -232,6 +238,8 @@ class MongoStore:
             doc.setdefault("status", "pending")
         if table == "declarations":
             doc.setdefault("email_sent", 0)
+        if table == "verification_codes":
+            doc.setdefault("used", 0)
         return doc
 
     def _insert_doc(self, table, doc):

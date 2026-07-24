@@ -4850,7 +4850,6 @@ def list_pending_dmvic_confirmations():
 
 @app.route('/api/dmvic/confirm-issuance', methods=['POST'])
 @login_required
-@admin_required
 def dmvic_confirm_issuance_route():
     """Approve or reject a DMVIC policy alert after a genuine manual review."""
     data = request.get_json() or {}
@@ -4865,10 +4864,12 @@ def dmvic_confirm_issuance_route():
     if is_approved and not (is_logbook_verified and is_vehicle_inspected):
         return jsonify({"error": "Confirm both the logbook verification and vehicle inspection before approving."}), 400
 
-    policy = query("""SELECT policy_no, dmvic_issuance_request_id, dmvic_status
+    policy = query("""SELECT policy_no, agent_id, dmvic_issuance_request_id, dmvic_status
                       FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
     if not policy:
         return jsonify({"error": "Policy not found"}), 404
+    if session.get('role') != 'admin' and policy.get('agent_id') != session.get('user_id'):
+        return jsonify({"error": "You do not have access to confirm this policy's DMVIC alert."}), 403
     if policy.get('dmvic_status') != 'pending_confirmation' or not policy.get('dmvic_issuance_request_id'):
         return jsonify({"error": "This policy has no pending DMVIC issuance confirmation."}), 409
 
