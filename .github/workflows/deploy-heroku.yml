@@ -24,4 +24,4 @@ jobs:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
           git remote add heroku "https://heroku:${HEROKU_API_KEY}@git.heroku.com/westlake-insurance.git"
-          git push heroku HEAD:master
+          git push --force heroku HEAD:master
