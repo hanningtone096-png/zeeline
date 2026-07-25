@@ -348,8 +348,21 @@
         <input id="vehicle_reg" placeholder="KBC 123X" style="text-transform:uppercase;">
     </div>
     <div class="form-group">
-        <label for="make">Make / Model *</label>
-        <input id="make" placeholder="e.g. Toyota Hiace">
+        <label for="vehicle_make">Vehicle Make *</label>
+        <input id="vehicle_make" placeholder="e.g. Toyota">
+        <small style="color:#64748b;">Enter exactly as it appears on the logbook.</small>
+    </div>
+</div>
+<div class="grid-2">
+    <div class="form-group">
+        <label for="vehicle_model">Vehicle Model *</label>
+        <input id="vehicle_model" placeholder="e.g. Hiace">
+        <small style="color:#64748b;">Enter exactly as it appears on the logbook.</small>
+    </div>
+    <div class="form-group">
+        <label for="year_of_registration">Year of Registration *</label>
+        <input id="year_of_registration" type="number" min="1970" max="2026" placeholder="e.g. 2019">
+        <small style="color:#64748b;">Required by DMVIC for certificate issuance.</small>
     </div>
 </div>
 <div class="grid-2">
@@ -374,14 +387,9 @@
 </div>
 <div class="grid-2">
     <div class="form-group">
-        <label for="year_of_manufacture">Year of Manufacture *</label>
+        <label for="year_of_manufacture">Year of Manufacture</label>
         <input id="year_of_manufacture" type="number" min="1970" max="2026" placeholder="e.g. 2019">
-        <small style="color:#64748b;">Comprehensive cover max age varies by insurer/class (typically 15–20 yrs).</small>
-    </div>
-    <div class="form-group">
-        <label for="year_of_registration">Year of Registration *</label>
-        <input id="year_of_registration" type="number" min="1970" max="2026" placeholder="e.g. 2019">
-        <small style="color:#64748b;">Year the vehicle was first registered in Kenya, if different from year of manufacture. Required by DMVIC for certificate issuance.</small>
+        <small style="color:#64748b;">Optional unless the selected insurer requires it for the chosen cover.</small>
     </div>
 </div>
 
@@ -442,7 +450,7 @@ const data = {
     product:null, sub_type:null, pax:0, commencing_date:'', expiry_date:'',
     policy_holder_name:'', email:'', phone:'', kra_pin:'', id_number:'', postal_address:'',
     vehicle_reg:'', chassis_number:'', vehicle_body_type:'',
-    engine_number:'', make:'', seats:0, vehicle_value:0, tonnage:0,
+    engine_number:'', make:'', vehicle_make:'', vehicle_model:'', seats:0, vehicle_value:0, tonnage:0,
     year_of_manufacture:'', year_of_registration:''
 };
 
@@ -766,7 +774,9 @@ function goToReview() {
     const chassis = document.getElementById('chassis_number').value.trim().toUpperCase();
     const body    = document.getElementById('vehicle_body_type').value.trim();
     const engine  = document.getElementById('engine_number').value.trim().toUpperCase();
-    const make    = document.getElementById('make').value.trim();
+    const vehicleMake = document.getElementById('vehicle_make').value.trim();
+    const vehicleModel = document.getElementById('vehicle_model').value.trim();
+    const make = `${vehicleMake} ${vehicleModel}`.trim();
     const seats   = parseInt(document.getElementById('passengers_licensed_to_carry').value) || 0;
     const value   = parseFloat(document.getElementById('vehicle_value').value) || 0;
     const tonnage = parseFloat(document.getElementById('tonnage').value) || 0;
@@ -774,9 +784,9 @@ function goToReview() {
     const yom     = document.getElementById('year_of_manufacture').value.trim();
     const yor     = document.getElementById('year_of_registration').value.trim();
 
-    if (!reg || !chassis || !body || !make || !engine) return showError('Please complete all required vehicle fields.');
+    if (!reg || !chassis || !body || !vehicleMake || !vehicleModel || !engine)
+        return showError('Registration, chassis, engine, vehicle make, vehicle model and body type must match the logbook.');
     if (seats < 1)                           return showError('Please enter the number of seats.');
-    if (!yom)                                return showError('Year of manufacture is required.');
     if (!yor)                                return showError('Year of registration is required.');
     if (data.type_of_cover !== 'third_party_only' && value <= 0)
         return showError('Vehicle value is required for this cover type.');
@@ -786,7 +796,8 @@ function goToReview() {
         return showError('Number of passengers is required for this vehicle type.');
 
     Object.assign(data, { vehicle_reg:reg, chassis_number:chassis, vehicle_body_type:body,
-                           engine_number:engine, make, seats, vehicle_value:value, tonnage, pax,
+                           engine_number:engine, make, vehicle_make:vehicleMake, vehicle_model:vehicleModel,
+                           seats, vehicle_value:value, tonnage, pax,
                            year_of_manufacture: yom, year_of_registration: yor });
 
     const CERT_LABELS = { annual:'Annual','30_days':'30 Days','14_days':'14 Days','7_days':'7 Days', inst_3:'3 Instalments',inst_6:'6 Instalments',inst_9:'9 Instalments',inst_10:'2 Instalments' };
@@ -806,7 +817,7 @@ function goToReview() {
         ${data.id_number ? `<p><strong>ID/Passport:</strong> ${esc(data.id_number)}</p>` : ''}
         ${data.postal_address ? `<p><strong>Postal Address:</strong> ${esc(data.postal_address)}</p>` : ''}
         <hr>
-        <p><strong>Vehicle:</strong> ${esc(data.vehicle_reg)} — ${esc(data.make)}</p>
+        <p><strong>Vehicle:</strong> ${esc(data.vehicle_reg)} — ${esc(data.vehicle_make)} ${esc(data.vehicle_model)}</p>
         <p><strong>Chassis:</strong> ${esc(data.chassis_number)} &nbsp;|&nbsp; <strong>Engine:</strong> ${esc(data.engine_number)||'—'}</p>
         <p><strong>Body:</strong> ${esc(data.vehicle_body_type)} &nbsp;|&nbsp; <strong>Seats:</strong> ${data.seats}</p>
         ${data.year_of_manufacture ? `<p><strong>Year of Manufacture:</strong> ${esc(data.year_of_manufacture)}</p>` : ''}
@@ -1103,9 +1114,8 @@ function pollDmvicStatus(policyNo) {
         }
         if (status === 'pending_confirmation') {
             box.className = 'dmvic-status-box manual';
-            box.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>DMVIC Policy Alert Awaiting Confirmation</strong><br>
-                <span style="font-size:12px;">${esc(statusData.error || 'Verify the logbook and vehicle inspection before the certificate can be issued.')}</span>`;
-            showQuotationDmvicConfirmation(statusData);
+            box.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>DMVIC Data Review Required</strong><br>
+                <span style="font-size:12px;">${esc(statusData.error || 'Verify the logbook and insurer record, then re-quote. DMVIC does not offer manual approval for this alert.')}</span>`;
             return true;
         }
         if (status === 'unsupported') {
