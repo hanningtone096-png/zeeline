@@ -4401,8 +4401,9 @@ def check_double_insurance():
     commencing_date = (request.args.get('commencing_date') or '').strip()
     expiry_date = (request.args.get('expiry_date') or '').strip()
     today_str = date.today().strftime('%d/%m/%Y')
+    tomorrow_str = (date.today() + timedelta(days=1)).strftime('%d/%m/%Y')
     dmvic_start = _dmvic_fmt_date(commencing_date) if commencing_date else today_str
-    dmvic_end = _dmvic_fmt_date(expiry_date) if expiry_date else today_str
+    dmvic_end = _dmvic_fmt_date(expiry_date) if expiry_date else tomorrow_str
     # The quotation wizard supplies the two identifiers separately. For the
     # dashboard's one generic search field, never call DMVIC with a partial
     # value and then incorrectly report the vehicle clear.
