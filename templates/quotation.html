@@ -965,13 +965,20 @@ async function downloadQuotePdf(quoteId, button) {
 /* ── NEW: check whether this reg/chassis already has an active policy ──── */
 async function checkDoubleInsurance() {
     const q = (data.vehicle_reg || '').trim();
-    if (q.length < 3) return { has_active_match: false, results: [] };
+    if (q.length < 3) return { has_active_match: false, has_dmvic_match: false, results: [], dmvic: { checked: false, matches: [] } };
     try {
-        const res = await fetch(`/api/policies/check-double-insurance?query=${encodeURIComponent(q)}`);
-        if (!res.ok) return { has_active_match: false, results: [] };
+        const params = new URLSearchParams({
+            query: q,
+            vehicle_reg: q,
+            chassis_number: data.chassis_number || '',
+        });
+        if (data.commencing_date) params.set('commencing_date', data.commencing_date);
+        if (data.expiry_date) params.set('expiry_date', data.expiry_date);
+        const res = await fetch(`/api/policies/check-double-insurance?${params.toString()}`);
+        if (!res.ok) return { has_active_match: false, has_dmvic_match: false, results: [], dmvic: { checked: false, matches: [] } };
         return await res.json();
     } catch (err) {
-        return { has_active_match: false, results: [] };
+        return { has_active_match: false, has_dmvic_match: false, results: [], dmvic: { checked: false, matches: [] } };
     }
 }
 
@@ -987,10 +994,11 @@ async function buyCover(quoteId) {
     const dbl = await checkDoubleInsurance();
 
     let proceedAnyway = true;
-    if (dbl.has_active_match) {
+    if (dbl.has_active_match || dbl.has_dmvic_match) {
+        const source = dbl.has_dmvic_match ? 'DMVIC records' : 'our records';
         proceedAnyway = confirm(
             '⚠️ DOUBLE INSURANCE DETECTED\n\n' +
-            `${data.vehicle_reg} already has an active policy on record.\n` +
+            `${data.vehicle_reg} already has an active policy on record in ${source}.\n` +
             'DMVIC will very likely reject certificate issuance for this vehicle (error ER005).\n\n' +
             'Proceed anyway? (Policy will still be created, but DMVIC issuance may fail.)'
         );
@@ -1031,10 +1039,11 @@ async function buyCover(quoteId) {
 
         // ── NEW: persistent double-insurance banner (in addition to the
         // confirm() gate above) so it's visible on-screen after purchase too.
-        const doubleInsuranceBanner = dbl.has_active_match ? `
+        const doubleInsuranceBanner = (dbl.has_active_match || dbl.has_dmvic_match) ? `
             <div class="double-insurance-banner">
                 <p><i class="fas fa-exclamation-triangle"></i> Double Insurance Detected</p>
-                <small>${esc(data.vehicle_reg)} already had an active policy on record when this
+                <small>${esc(data.vehicle_reg)} already had an active policy on record
+                (${dbl.has_dmvic_match ? 'per DMVIC' : 'in our own records'}) when this
                 one was created. DMVIC certificate issuance may be rejected (ER005) — check the
                 certificate status below, or verify with the client before proceeding.</small>
             </div>` : '';

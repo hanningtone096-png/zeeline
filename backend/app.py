@@ -820,6 +820,59 @@ def dmvic_issuance_request_id(response_data):
     return walk(response_data)
 
 
+def dmvic_validate_double_insurance(token, *, policy_start_date, policy_end_date,
+                                     vehicle_reg=None, chassis_number=None):
+    """Check DMVIC for certificates overlapping a proposed cover period.
+
+    The check is advisory and is deliberately isolated from policy issuance:
+    DMVIC or network failures must not make the local policy search fail.
+    """
+    if not vehicle_reg and not chassis_number:
+        return {"success": False, "error": "A registration or chassis number is required."}
+
+    payload = {
+        "policystartdate": policy_start_date,
+        "policyenddate": policy_end_date,
+    }
+    if vehicle_reg:
+        payload["vehicleregistrationnumber"] = vehicle_reg
+    if chassis_number:
+        payload["chassisnumber"] = chassis_number
+
+    try:
+        res = requests.post(
+            f"{DMVIC_BASE_URL}/api/v6/Integration/ValidateDoubleInsurance",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "ClientID": DMVIC_CLIENT_ID,
+            },
+            cert=dmvic_cert_tuple(),
+            timeout=20,
+        )
+        data = res.json()
+    except Exception as e:
+        log.error("DMVIC double-insurance lookup error: %s", type(e).__name__)
+        return {"success": False, "error": "Could not reach DMVIC."}
+
+    if data.get("success"):
+        matches = (data.get("callbackObj") or {}).get("DoubleInsurance") or []
+        return {"success": True, "matches": matches if isinstance(matches, list) else [matches]}
+
+    errors = data.get("Error") or data.get("Errors") or []
+    if isinstance(errors, dict):
+        errors = [errors]
+    # DMVIC uses ER0016 for a clear vehicle lookup, which is a successful
+    # business result rather than a technical failure.
+    if any((error.get("errorCode") or error.get("code")) == "ER0016" for error in errors):
+        return {"success": True, "matches": []}
+
+    messages = [error.get("errorText") or error.get("message") or "" for error in errors]
+    log.warning("DMVIC double-insurance lookup failed (%s): %s",
+                data.get("APIRequestNumber"), messages)
+    return {"success": False, "error": "; ".join(message for message in messages if message) or "DMVIC lookup failed."}
+
+
 def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approved,
                                         is_logbook_verified, is_vehicle_inspected,
                                         additional_comments='', usernames=''):
@@ -4327,6 +4380,7 @@ def list_policies():
 
 @app.route('/api/policies/check-double-insurance')
 @login_required
+@limiter.limit("20 per minute")
 def check_double_insurance():
     """Search by vehicle registration number OR chassis number to see if a
     vehicle already has an active (non-expired, non-cancelled) policy —
@@ -4336,11 +4390,29 @@ def check_double_insurance():
     certificate issuance.
 
     Chassis number isn't stored on `policies` directly, so this joins to
-    `quotations` (via policies.quote_id) to search both fields at once.
+    `quotations` (via policies.quote_id) to search both fields at once. A
+    best-effort DMVIC lookup is returned separately, so agents can catch an
+    overlap created by another insurer before they create a new policy.
     """
     q = (request.args.get('query') or '').strip().upper()
     if not q or len(q) < 3:
         return jsonify({"error": "Enter at least 3 characters of the registration or chassis number"}), 400
+
+    commencing_date = (request.args.get('commencing_date') or '').strip()
+    expiry_date = (request.args.get('expiry_date') or '').strip()
+    today_str = date.today().strftime('%d/%m/%Y')
+    dmvic_start = _dmvic_fmt_date(commencing_date) if commencing_date else today_str
+    dmvic_end = _dmvic_fmt_date(expiry_date) if expiry_date else today_str
+    # The quotation wizard supplies the two identifiers separately. For the
+    # dashboard's one generic search field, never call DMVIC with a partial
+    # value and then incorrectly report the vehicle clear.
+    dmvic_reg = (request.args.get('vehicle_reg') or '').strip().upper()
+    dmvic_chassis = (request.args.get('chassis_number') or '').strip().upper()
+    if not dmvic_reg and not dmvic_chassis:
+        if re.fullmatch(r"[A-Z]{2,3}\d{3,4}[A-Z]?", q):
+            dmvic_reg = q
+        elif len(q) >= 6:
+            dmvic_chassis = q
 
     like = f"%{q}%"
     rows = query("""
@@ -4367,9 +4439,31 @@ def check_double_insurance():
         )
         r['is_double_insurance_risk'] = active_today
 
+    dmvic = {"checked": False, "matches": [], "error": None}
+    token = dmvic_get_token() if (dmvic_reg or dmvic_chassis) else None
+    if token:
+        live = dmvic_validate_double_insurance(
+            token,
+            policy_start_date=dmvic_start,
+            policy_end_date=dmvic_end,
+            vehicle_reg=dmvic_reg or None,
+            chassis_number=dmvic_chassis or None,
+        )
+        if live.get("success"):
+            dmvic["checked"] = True
+            dmvic["matches"] = live.get("matches") or []
+        else:
+            dmvic["error"] = live.get("error")
+    elif dmvic_reg or dmvic_chassis:
+        dmvic["error"] = "Could not obtain a DMVIC auth token."
+    else:
+        dmvic["error"] = "Enter a full registration or chassis number for the live DMVIC check."
+
     return jsonify({
         "results": rows,
         "has_active_match": any(r['is_double_insurance_risk'] for r in rows),
+        "dmvic": dmvic,
+        "has_dmvic_match": bool(dmvic["matches"]),
     })
 
 

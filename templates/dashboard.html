@@ -609,7 +609,7 @@ async function checkDoubleInsurance() {
         return;
     }
 
-    box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Searching…</p>';
+    box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Searching our records and DMVIC…</p>';
 
     try {
         const res  = await fetch(`/api/policies/check-double-insurance?query=${encodeURIComponent(q)}`);
@@ -620,46 +620,47 @@ async function checkDoubleInsurance() {
             return;
         }
 
-        if (!data.results || data.results.length === 0) {
-            box.innerHTML = `<p style="color:#16a34a;font-size:13px;"><i class="fas fa-circle-check"></i> No matching policies found. This vehicle looks clear.</p>`;
-            return;
+        const dmvic = data.dmvic || { checked: false, matches: [], error: null };
+        let dmvicHtml;
+        if (!dmvic.checked) {
+            dmvicHtml = `<p style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:10px 14px;border-radius:8px;font-size:13px;">
+                <i class="fas fa-triangle-exclamation"></i> Could not check DMVIC directly (${esc(dmvic.error || 'unknown error')}). Local records only.
+            </p>`;
+        } else if (dmvic.matches.length === 0) {
+            dmvicHtml = `<p style="color:#16a34a;font-size:13px;"><i class="fas fa-circle-check"></i> DMVIC: no active certificate found for this vehicle.</p>`;
+        } else {
+            const rows = dmvic.matches.map(match => `
+                <tr>
+                    <td><span style="font-family:monospace;font-size:12px;">${esc(match.InsuranceCertificateNo || '—')}</span></td>
+                    <td>${esc(match.RegistrationNumber || '—')}</td>
+                    <td>${esc(match.ChassisNumber || '—')}</td>
+                    <td>${esc(match.MemberCompanyName || '—')}</td>
+                    <td>${esc(match.CoverEndDate || '—')}</td>
+                </tr>`).join('');
+            dmvicHtml = `<p style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;">
+                <i class="fas fa-triangle-exclamation"></i> DMVIC shows an existing certificate. A new certificate may be rejected as double insurance until it expires or is cancelled.
+            </p>
+            <div style="overflow-x:auto;margin-top:8px;"><table class="agent-table">
+                <thead><tr><th>Certificate No</th><th>Reg No</th><th>Chassis</th><th>Insurer</th><th>Cover End</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table></div>`;
         }
 
-        const warning = data.has_active_match
-            ? `<p style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;">
-                 <i class="fas fa-triangle-exclamation"></i> This vehicle has an ACTIVE policy. Issuing a new one now will likely be rejected by DMVIC as Double Insurance.
-               </p>`
-            : `<p style="color:#64748b;font-size:13px;">No currently-active match, but see history below.</p>`;
+        let localHtml = '<p style="color:#64748b;font-size:13px;margin-top:14px;">No matching policies in our records.</p>';
+        if (data.results && data.results.length) {
+            const warning = data.has_active_match
+                ? `<p style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;"><i class="fas fa-triangle-exclamation"></i> This vehicle has an ACTIVE policy in our records.</p>`
+                : '<p style="color:#64748b;font-size:13px;">No active local match, but see history below.</p>';
+            const rows = data.results.map(r => {
+                const badge = r.is_double_insurance_risk
+                    ? '<span class="badge" style="background:#fef2f2;color:#dc2626;">Active</span>'
+                    : `<span class="badge" style="background:#f1f5f9;color:#64748b;">${esc(r.status)}</span>`;
+                return `<tr><td><span style="font-family:monospace;font-size:12px;">${esc(r.policy_no)}</span></td><td>${esc(r.vehicle_reg || '—')}</td><td>${esc(r.chassis_number || '—')}</td><td>${esc(r.client_name || '—')}</td><td>${esc((r.type_of_cover || '').replace(/_/g,' '))}</td><td>${r.expiry_date ? new Date(r.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td><td>${badge}</td></tr>`;
+            }).join('');
+            localHtml = `<p style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-top:18px;margin-bottom:6px;">Our Records</p>${warning}<div style="overflow-x:auto;margin-top:10px;"><table class="agent-table"><thead><tr><th>Policy No</th><th>Reg No</th><th>Chassis</th><th>Client</th><th>Cover</th><th>Expiry</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+        }
 
-        const rowsHtml = data.results.map(r => {
-            const badge = r.is_double_insurance_risk
-                ? '<span class="badge" style="background:#fef2f2;color:#dc2626;">Active</span>'
-                : `<span class="badge" style="background:#f1f5f9;color:#64748b;">${esc(r.status)}</span>`;
-            return `
-                <tr>
-                    <td><span style="font-family:monospace;font-size:12px;">${esc(r.policy_no)}</span></td>
-                    <td>${esc(r.vehicle_reg || '—')}</td>
-                    <td>${esc(r.chassis_number || '—')}</td>
-                    <td>${esc(r.client_name || '—')}</td>
-                    <td>${esc((r.type_of_cover||'').replace(/_/g,' '))}</td>
-                    <td>${r.expiry_date ? new Date(r.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
-                    <td>${badge}</td>
-                </tr>`;
-        }).join('');
-
-        box.innerHTML = `
-            ${warning}
-            <div style="overflow-x:auto;margin-top:10px;">
-                <table class="agent-table">
-                    <thead>
-                        <tr>
-                            <th>Policy No</th><th>Reg No</th><th>Chassis</th>
-                            <th>Client</th><th>Cover</th><th>Expiry</th><th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rowsHtml}</tbody>
-                </table>
-            </div>`;
+        box.innerHTML = `<p style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">DMVIC (Live)</p>${dmvicHtml}${localHtml}`;
     } catch (err) {
         console.error('Double insurance check failed:', err);
         box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Server communication error. Please try again.</p>';
