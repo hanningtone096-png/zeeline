@@ -348,16 +348,16 @@
         <input id="vehicle_reg" placeholder="KBC 123X" style="text-transform:uppercase;">
     </div>
     <div class="form-group">
-        <label for="vehicle_make">Vehicle Make *</label>
+        <label for="vehicle_make">Vehicle Make</label>
         <input id="vehicle_make" placeholder="e.g. Toyota">
-        <small style="color:#64748b;">Enter exactly as it appears on the logbook.</small>
+        <small style="color:#64748b;">Optional. When supplied with Model, enter exactly as on the logbook.</small>
     </div>
 </div>
 <div class="grid-2">
     <div class="form-group">
-        <label for="vehicle_model">Vehicle Model *</label>
+        <label for="vehicle_model">Vehicle Model</label>
         <input id="vehicle_model" placeholder="e.g. Hiace">
-        <small style="color:#64748b;">Enter exactly as it appears on the logbook.</small>
+        <small style="color:#64748b;">Optional. Leave both Make and Model blank if either value is uncertain.</small>
     </div>
     <div class="form-group">
         <label for="year_of_registration">Year of Registration *</label>
@@ -371,7 +371,7 @@
         <input id="chassis_number" placeholder="Chassis No" style="text-transform:uppercase;">
     </div>
     <div class="form-group">
-        <label for="engine_number">Engine Number *</label>
+        <label for="engine_number">Engine Number</label>
         <input id="engine_number" placeholder="Engine No" style="text-transform:uppercase;">
     </div>
 </div>
@@ -784,8 +784,8 @@ function goToReview() {
     const yom     = document.getElementById('year_of_manufacture').value.trim();
     const yor     = document.getElementById('year_of_registration').value.trim();
 
-    if (!reg || !chassis || !body || !vehicleMake || !vehicleModel || !engine)
-        return showError('Registration, chassis, engine, vehicle make, vehicle model and body type must match the logbook.');
+    if (!reg || !chassis || !body)
+        return showError('Registration number, chassis number and body type are required.');
     if (seats < 1)                           return showError('Please enter the number of seats.');
     if (!yor)                                return showError('Year of registration is required.');
     if (data.type_of_cover !== 'third_party_only' && value <= 0)

@@ -893,9 +893,6 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
         "Phonenumber": phone_number,
         "Bodytype": body_type,
         "Licensedtocarry": licensed_to_carry,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         # DMVIC marks this mandatory (format YYYY); fall back to year_of_manufacture
@@ -905,6 +902,11 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
     }
     if sum_insured is not None:
         payload["SumInsured"] = sum_insured
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if year_of_manufacture is not None:
         payload["Yearofmanufacture"] = year_of_manufacture
     if huduma_number:
@@ -994,15 +996,17 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
         # DMVIC reports it as missing (ER003 "Tonnage is required") even with a value set.
         "Tonnage": tonnage_carrying_capacity,
         "Licensedtocarry": licensed_to_carry,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         "Yearofregistration": year_of_registration,
     }
     if sum_insured is not None:
         payload["SumInsured"] = sum_insured
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if year_of_manufacture is not None:
         payload["Yearofmanufacture"] = year_of_manufacture
     if huduma_number:
@@ -1083,15 +1087,17 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
         "Chassisnumber": chassis_number,
         "Phonenumber": phone_number,
         "Bodytype": body_type,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         "Yearofregistration": year_of_registration,
     }
     if sum_insured is not None:
         payload["SumInsured"] = sum_insured
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if year_of_manufacture is not None:
         payload["Yearofmanufacture"] = year_of_manufacture
     if huduma_number:
@@ -1188,15 +1194,17 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
         "Chassisnumber": chassis_number,
         "Phonenumber": phone_number,
         "Bodytype": body_type,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         "Yearofregistration": year_of_registration,
     }
     if licensed_to_carry is not None:
         payload["Licensedtocarry"] = licensed_to_carry
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if tonnage is not None:
         payload["Tonnage"] = tonnage
     if sum_insured is not None:
@@ -1300,13 +1308,12 @@ def _dmvic_fmt_date(d):
 
 
 def dmvic_vehicle_identity(quote_row):
-    """Return DMVIC's separately verified vehicle identifiers.
+    """Return the vehicle identifiers that are safe to send to DMVIC.
 
-    DMVIC compares engine number, make and model with its previous certificate
-    records.  Do not guess a split from the legacy combined ``make`` field:
-    a value such as "Land Cruiser" can be either a model or a make/model
-    description and a guessed split creates the very mismatch we are trying to
-    avoid.
+    Registration and chassis are required for the quotation. Engine, make and
+    model are optional in the user workflow. DMVIC compares supplied values
+    with previous certificates, so partial or guessed optional values must be
+    omitted rather than represented as empty strings or an invented split.
     """
     identity = {
         "registration_number": str(quote_row.get("vehicle_reg") or "").strip().upper(),
@@ -1318,11 +1325,17 @@ def dmvic_vehicle_identity(quote_row):
     labels = {
         "registration_number": "registration number",
         "chassis_number": "chassis number",
-        "engine_number": "engine number",
-        "vehicle_make": "vehicle make",
-        "vehicle_model": "vehicle model",
     }
-    missing = [labels[key] for key, value in identity.items() if not value]
+    missing = [labels[key] for key in labels if not identity[key]]
+
+    # DMVIC expects make and model to be separate values. Never treat the old
+    # combined display field as a reliable source, and omit either field unless
+    # the agent supplied both exact logbook values.
+    if not (identity["vehicle_make"] and identity["vehicle_model"]):
+        identity["vehicle_make"] = None
+        identity["vehicle_model"] = None
+    if not identity["engine_number"]:
+        identity["engine_number"] = None
     return identity, missing
 
 
@@ -3924,8 +3937,7 @@ def generate_quotation():
         'company', 'type_of_cover', 'type_of_certificate', 'product',
         'commencing_date', 'expiry_date',
         'policy_holder_name', 'phone', 'kra_pin',
-        'vehicle_reg', 'chassis_number', 'engine_number', 'vehicle_body_type',
-        'vehicle_make', 'vehicle_model', 'make', 'seats'
+        'vehicle_reg', 'chassis_number', 'vehicle_body_type', 'seats'
     )
 
     missing = [k for k in required if not d.get(k)]
