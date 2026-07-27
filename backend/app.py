@@ -4397,19 +4397,6 @@ def check_double_insurance():
             policy_end_date=dmvic_end,
             vehicle_reg=q,
         )
-        if not live.get("success") and _dmvic_is_token_error(live):
-            # Cached token was rejected as expired/invalid by DMVIC even though
-            # our local cache thought it was still good — force a refresh and
-            # retry once, same pattern as dmvic_issue_with_retry() uses for
-            # certificate issuance.
-            fresh_token = dmvic_get_token(force_refresh=True)
-            if fresh_token:
-                live = dmvic_validate_double_insurance(
-                    fresh_token,
-                    policy_start_date=dmvic_start,
-                    policy_end_date=dmvic_end,
-                    vehicle_reg=q,
-                )
         if live.get("success"):
             dmvic_result["checked"] = True
             dmvic_result["matches"] = live.get("matches") or []
