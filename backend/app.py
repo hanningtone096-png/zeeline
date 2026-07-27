@@ -879,11 +879,8 @@ def dmvic_validate_double_insurance(token, *, policy_start_date, policy_end_date
     messages = [e.get("errorText") or e.get("message") or "" for e in errors]
     log.warning("DMVIC ValidateDoubleInsurance failed (%s): %s",
                 data.get("APIRequestNumber"), messages)
-    return {
-        "success": False,
-        "error": "; ".join(m for m in messages if m) or "DMVIC lookup failed.",
-        "error_codes": [e.get("errorCode") or e.get("code") for e in errors],
-    }
+    return {"success": False, "error": "; ".join(m for m in messages if m) or "DMVIC lookup failed."}
+
 
 def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approved,
                                         is_logbook_verified, is_vehicle_inspected,
