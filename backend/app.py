@@ -728,6 +728,17 @@ DMVIC_LOGIN_ERRORS = {
 _dmvic_token_cache = {"token": None, "expires": None}
 _dmvic_token_lock = threading.Lock()
 
+
+def _dmvic_clear_token_cache():
+    """Discard a token DMVIC has explicitly rejected.
+
+    DMVIC permits one active token per account.  Retaining a rejected token
+    until its advertised expiry makes every later request fail in exactly the
+    same way, even after the account itself has been restored.
+    """
+    _dmvic_token_cache["token"] = None
+    _dmvic_token_cache["expires"] = None
+
 # ── Existing DMVIC functions below ──────────────────────────────────────────
 
 def dmvic_get_token(force_refresh=False):
@@ -738,6 +749,9 @@ def dmvic_get_token(force_refresh=False):
     each other's token. Set force_refresh after an ER001 response.
     """
     with _dmvic_token_lock:
+        if force_refresh:
+            _dmvic_clear_token_cache()
+
         cached = _dmvic_token_cache.get("token")
         expires = _dmvic_token_cache.get("expires")
         if not force_refresh and cached and expires and datetime.now() < expires - timedelta(minutes=5):
@@ -777,7 +791,10 @@ def dmvic_get_token(force_refresh=False):
 def _dmvic_is_token_error(result):
     if result.get("success"):
         return False
-    return "ER001" in (result.get("error_codes") or [])
+    if "ER001" in (result.get("error_codes") or []):
+        return True
+    error = (result.get("error") or "").lower()
+    return "token" in error and ("expired" in error or "invalid" in error)
 
 
 def dmvic_issue_with_retry(issue_fn, token, **kwargs):
@@ -822,28 +839,17 @@ def dmvic_issuance_request_id(response_data):
 
 def dmvic_validate_double_insurance(token, *, policy_start_date, policy_end_date,
                                      vehicle_reg=None, chassis_number=None):
-    """POST /api/v6/Integration/ValidateDoubleInsurance (spec v1.8.1, section 4.11).
+    """Check DMVIC for certificates overlapping a proposed cover period.
 
-    Checks DMVIC's full database (not just our own `policies` table) for any
-    existing certificate on this vehicle whose cover overlaps the given
-    period. At least one of vehicle_reg / chassis_number is required by
-    DMVIC; dates must already be formatted DD/MM/YYYY before calling this.
-
-    Returns a dict:
-      {"success": True, "matches": [...]}                — matches is a list
-          of DMVIC's DoubleInsurance records (may be empty if none found)
-      {"success": False, "error": "..."}                  — request/lookup
-          failed (network error, or a DMVIC error other than "no records")
-    DMVIC's own "no records found" (ER0016) response is normalized to
-    {"success": True, "matches": []} here, since that isn't a failure —
-    it's the good outcome (vehicle is clear).
+    The check is advisory and is deliberately isolated from policy issuance:
+    DMVIC or network failures must not make the local policy search fail.
     """
     if not vehicle_reg and not chassis_number:
-        return {"success": False, "error": "vehicle_reg or chassis_number is required"}
+        return {"success": False, "error": "A registration or chassis number is required."}
 
     payload = {
         "policystartdate": policy_start_date,
-        "policyenddate":   policy_end_date,
+        "policyenddate": policy_end_date,
     }
     if vehicle_reg:
         payload["vehicleregistrationnumber"] = vehicle_reg
@@ -863,23 +869,30 @@ def dmvic_validate_double_insurance(token, *, policy_start_date, policy_end_date
         )
         data = res.json()
     except Exception as e:
-        log.error("DMVIC ValidateDoubleInsurance error: %s", type(e).__name__)
-        return {"success": False, "error": "Could not reach DMVIC. Please try again."}
+        log.error("DMVIC double-insurance lookup error: %s", type(e).__name__)
+        return {"success": False, "error": "Could not reach DMVIC."}
 
     if data.get("success"):
         matches = (data.get("callbackObj") or {}).get("DoubleInsurance") or []
-        return {"success": True, "matches": matches}
+        return {"success": True, "matches": matches if isinstance(matches, list) else [matches]}
 
-    errors = data.get("Error") or []
-    # "No Records Found" is DMVIC's way of saying the vehicle is clear —
-    # that's a successful check with zero matches, not a failure.
-    if any((e.get("errorCode") or e.get("code")) == "ER0016" for e in errors):
+    errors = data.get("Error") or data.get("Errors") or []
+    if isinstance(errors, dict):
+        errors = [errors]
+    # DMVIC uses ER0016 for a clear vehicle lookup, which is a successful
+    # business result rather than a technical failure.
+    if any((error.get("errorCode") or error.get("code")) == "ER0016" for error in errors):
         return {"success": True, "matches": []}
 
-    messages = [e.get("errorText") or e.get("message") or "" for e in errors]
-    log.warning("DMVIC ValidateDoubleInsurance failed (%s): %s",
+    error_codes = [error.get("errorCode") or error.get("code") for error in errors]
+    messages = [error.get("errorText") or error.get("message") or "" for error in errors]
+    log.warning("DMVIC double-insurance lookup failed (%s): %s",
                 data.get("APIRequestNumber"), messages)
-    return {"success": False, "error": "; ".join(m for m in messages if m) or "DMVIC lookup failed."}
+    return {
+        "success": False,
+        "error": "; ".join(message for message in messages if message) or "DMVIC lookup failed.",
+        "error_codes": error_codes,
+    }
 
 
 def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approved,
@@ -955,9 +968,6 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
         "Phonenumber": phone_number,
         "Bodytype": body_type,
         "Licensedtocarry": licensed_to_carry,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         # DMVIC marks this mandatory (format YYYY); fall back to year_of_manufacture
@@ -967,6 +977,11 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
     }
     if sum_insured is not None:
         payload["SumInsured"] = sum_insured
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if year_of_manufacture is not None:
         payload["Yearofmanufacture"] = year_of_manufacture
     if huduma_number:
@@ -1056,15 +1071,17 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
         # DMVIC reports it as missing (ER003 "Tonnage is required") even with a value set.
         "Tonnage": tonnage_carrying_capacity,
         "Licensedtocarry": licensed_to_carry,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         "Yearofregistration": year_of_registration,
     }
     if sum_insured is not None:
         payload["SumInsured"] = sum_insured
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if year_of_manufacture is not None:
         payload["Yearofmanufacture"] = year_of_manufacture
     if huduma_number:
@@ -1145,15 +1162,17 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
         "Chassisnumber": chassis_number,
         "Phonenumber": phone_number,
         "Bodytype": body_type,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         "Yearofregistration": year_of_registration,
     }
     if sum_insured is not None:
         payload["SumInsured"] = sum_insured
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if year_of_manufacture is not None:
         payload["Yearofmanufacture"] = year_of_manufacture
     if huduma_number:
@@ -1250,15 +1269,17 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
         "Chassisnumber": chassis_number,
         "Phonenumber": phone_number,
         "Bodytype": body_type,
-        "Vehiclemake": vehicle_make or "",
-        "Vehiclemodel": vehicle_model or "",
-        "Enginenumber": engine_number or "",
         "Email": email,
         "InsuredPIN": insured_pin,
         "Yearofregistration": year_of_registration,
     }
     if licensed_to_carry is not None:
         payload["Licensedtocarry"] = licensed_to_carry
+    if vehicle_make and vehicle_model:
+        payload["Vehiclemake"] = vehicle_make
+        payload["Vehiclemodel"] = vehicle_model
+    if engine_number:
+        payload["Enginenumber"] = engine_number
     if tonnage is not None:
         payload["Tonnage"] = tonnage
     if sum_insured is not None:
@@ -1360,6 +1381,39 @@ def _dmvic_fmt_date(d):
 
     return str(d)
 
+
+def dmvic_vehicle_identity(quote_row):
+    """Return the vehicle identifiers that are safe to send to DMVIC.
+
+    Registration and chassis are required for the quotation. Engine, make and
+    model are optional in the user workflow. DMVIC compares supplied values
+    with previous certificates, so partial or guessed optional values must be
+    omitted rather than represented as empty strings or an invented split.
+    """
+    identity = {
+        "registration_number": str(quote_row.get("vehicle_reg") or "").strip().upper(),
+        "chassis_number": str(quote_row.get("chassis_number") or "").strip().upper(),
+        "engine_number": str(quote_row.get("engine_number") or "").strip().upper(),
+        "vehicle_make": str(quote_row.get("vehicle_make") or "").strip(),
+        "vehicle_model": str(quote_row.get("vehicle_model") or "").strip(),
+    }
+    labels = {
+        "registration_number": "registration number",
+        "chassis_number": "chassis number",
+    }
+    missing = [labels[key] for key in labels if not identity[key]]
+
+    # DMVIC expects make and model to be separate values. Never treat the old
+    # combined display field as a reliable source, and omit either field unless
+    # the agent supplied both exact logbook values.
+    if not (identity["vehicle_make"] and identity["vehicle_model"]):
+        identity["vehicle_make"] = None
+        identity["vehicle_model"] = None
+    if not identity["engine_number"]:
+        identity["engine_number"] = None
+    return identity, missing
+
+
 def issue_dmvic_certificate(policy_no, quote_row):
     """
     Attempts DMVIC certificate issuance for a newly-created policy. Called
@@ -1385,6 +1439,17 @@ def issue_dmvic_certificate(policy_no, quote_row):
     bucket = PRODUCT_TO_CERT_TYPE.get(quote_row.get('product'))
     product = quote_row.get('product')
     company = quote_row.get('company')
+
+    identity, missing_identity = dmvic_vehicle_identity(quote_row)
+    if missing_identity:
+        msg = ("DMVIC issuance held: verify and re-quote the "
+               f"{', '.join(missing_identity)} from the logbook. DMVIC compares "
+               "these values with previously issued certificates; the legacy "
+               "combined Make / Model field is not sent as a substitute.")
+        log.warning("DMVIC identity preflight held %s: %s", policy_no, missing_identity)
+        query("""UPDATE policies SET dmvic_status='pending_manual', dmvic_error=%s
+                  WHERE policy_no=%s""", (msg, policy_no), commit=True)
+        return
 
     member_company_id = dmvic_member_company_id(company)
     if member_company_id is None:
@@ -1447,15 +1512,16 @@ def issue_dmvic_certificate(policy_no, quote_row):
             policy_number=policy_no,
             commencing_date=_dmvic_fmt_date(quote_row.get('commencing_date')),
             expiring_date=_dmvic_fmt_date(quote_row.get('expiry_date')),
-            chassis_number=quote_row.get('chassis_number', ''),
+            chassis_number=identity['chassis_number'],
             phone_number=_dmvic_fmt_phone(quote_row.get('phone', '')),
             body_type=quote_row.get('vehicle_body_type', ''),
             licensed_to_carry=quote_row.get('seats', 0),
             email=quote_row.get('email', '') or '',
             insured_pin=quote_row.get('kra_pin', ''),
-            registration_number=quote_row.get('vehicle_reg', ''),
-            vehicle_make=quote_row.get('make', ''),
-            engine_number=quote_row.get('engine_number', ''),
+            registration_number=identity['registration_number'],
+            vehicle_make=identity['vehicle_make'],
+            vehicle_model=identity['vehicle_model'],
+            engine_number=identity['engine_number'],
             sum_insured=float(quote_row.get('vehicle_value') or 0) or None,
             year_of_manufacture=quote_row.get('year_of_manufacture') or None,
             year_of_registration=quote_row.get('year_of_registration') or None,
@@ -1530,7 +1596,7 @@ def issue_dmvic_certificate(policy_no, quote_row):
             policy_number=policy_no,
             commencing_date=_dmvic_fmt_date(quote_row.get('commencing_date')),
             expiring_date=_dmvic_fmt_date(quote_row.get('expiry_date')),
-            chassis_number=quote_row.get('chassis_number', ''),
+            chassis_number=identity['chassis_number'],
             phone_number=_dmvic_fmt_phone(quote_row.get('phone', '')),
             body_type=quote_row.get('vehicle_body_type', ''),
             tonnage_carrying_capacity=float(quote_row.get('tonnage') or 0),
@@ -1538,9 +1604,10 @@ def issue_dmvic_certificate(policy_no, quote_row):
             email=quote_row.get('email', '') or '',
             insured_pin=quote_row.get('kra_pin', ''),
             year_of_registration=year_of_registration,
-            registration_number=quote_row.get('vehicle_reg', ''),
-            vehicle_make=quote_row.get('make', ''),
-            engine_number=quote_row.get('engine_number', ''),
+            registration_number=identity['registration_number'],
+            vehicle_make=identity['vehicle_make'],
+            vehicle_model=identity['vehicle_model'],
+            engine_number=identity['engine_number'],
             sum_insured=float(quote_row.get('vehicle_value') or 0) or None,
             year_of_manufacture=quote_row.get('year_of_manufacture') or None,
         )
@@ -1574,15 +1641,16 @@ def issue_dmvic_certificate(policy_no, quote_row):
             policy_number=policy_no,
             commencing_date=_dmvic_fmt_date(quote_row.get('commencing_date')),
             expiring_date=_dmvic_fmt_date(quote_row.get('expiry_date')),
-            chassis_number=quote_row.get('chassis_number', ''),
+            chassis_number=identity['chassis_number'],
             phone_number=_dmvic_fmt_phone(quote_row.get('phone', '')),
             body_type=quote_row.get('vehicle_body_type', ''),
             email=quote_row.get('email', '') or '',
             insured_pin=quote_row.get('kra_pin', ''),
             year_of_registration=year_of_registration,
-            registration_number=quote_row.get('vehicle_reg', ''),
-            vehicle_make=quote_row.get('make', ''),
-            engine_number=quote_row.get('engine_number', ''),
+            registration_number=identity['registration_number'],
+            vehicle_make=identity['vehicle_make'],
+            vehicle_model=identity['vehicle_model'],
+            engine_number=identity['engine_number'],
             sum_insured=float(quote_row.get('vehicle_value') or 0) or None,
             year_of_manufacture=quote_row.get('year_of_manufacture') or None,
         )
@@ -1634,7 +1702,7 @@ def issue_dmvic_certificate(policy_no, quote_row):
             policy_number=policy_no,
             commencing_date=_dmvic_fmt_date(quote_row.get('commencing_date')),
             expiring_date=_dmvic_fmt_date(quote_row.get('expiry_date')),
-            chassis_number=quote_row.get('chassis_number', ''),
+            chassis_number=identity['chassis_number'],
             phone_number=_dmvic_fmt_phone(quote_row.get('phone', '')),
             body_type=quote_row.get('vehicle_body_type', ''),
             # Licensedtocarry is mandatory for TypeOfCertificate 4/9 (this branch);
@@ -1644,9 +1712,10 @@ def issue_dmvic_certificate(policy_no, quote_row):
             email=quote_row.get('email', '') or '',
             insured_pin=quote_row.get('kra_pin', ''),
             year_of_registration=year_of_registration,
-            registration_number=quote_row.get('vehicle_reg', ''),
-            vehicle_make=quote_row.get('make', ''),
-            engine_number=quote_row.get('engine_number', ''),
+            registration_number=identity['registration_number'],
+            vehicle_make=identity['vehicle_make'],
+            vehicle_model=identity['vehicle_model'],
+            engine_number=identity['engine_number'],
             sum_insured=float(quote_row.get('vehicle_value') or 0) or None,
             year_of_manufacture=quote_row.get('year_of_manufacture') or None,
         )
@@ -1674,20 +1743,26 @@ def issue_dmvic_certificate(policy_no, quote_row):
         log.info("DMVIC certificate issued for %s: %s",
                   policy_no, result.get('certificate_no'))
     else:
+        # DMVIC Support confirmed on 2026-07-25 that policy alerts are produced
+        # by its record comparison and that this account has no manual policy
+        # confirmation path.  An IssuanceRequestID is therefore retained for
+        # traceability only; it must not be presented as an approval bypass.
         issuance_request_id = result.get('issuance_request_id')
-        if issuance_request_id:
-            # A request ID means DMVIC held the issuance for a compliance review
-            # (for example, possible double insurance). Keep it pending until an
-            # admin records the required logbook and inspection checks.
+        error_codes = {str(code).upper() for code in (result.get('error_codes') or []) if code}
+        is_policy_alert = bool(issuance_request_id or error_codes.intersection({'ER005', 'ER007'}))
+        if is_policy_alert:
+            reason = result.get('error', 'DMVIC policy alert')
+            msg = (f"DMVIC data review required: {reason} Verify the certificate type, "
+                   "engine number, vehicle make and vehicle model against the logbook and "
+                   "the insurer's existing record, then re-quote. DMVIC does not provide a "
+                   "manual confirmation route for this alert.")
             query("""UPDATE policies
-                      SET dmvic_status='pending_confirmation',
+                      SET dmvic_status='pending_manual',
                           dmvic_issuance_request_id=%s,
                           dmvic_error=%s
                       WHERE policy_no=%s""",
-                  (issuance_request_id,
-                   result.get('error', 'Policy alert — awaiting manual confirmation'),
-                   policy_no), commit=True)
-            log.warning("DMVIC policy alert for %s; awaiting admin confirmation", policy_no)
+                  (issuance_request_id, msg, policy_no), commit=True)
+            log.warning("DMVIC policy alert for %s requires data correction; codes=%s", policy_no, error_codes)
         else:
             query("""UPDATE policies SET dmvic_status='failed', dmvic_error=%s
                       WHERE policy_no=%s""",
@@ -3926,12 +4001,18 @@ def upload_file():
 def generate_quotation():
     d = request.get_json() or {}
 
+    # DMVIC stores make and model independently.  Keep the legacy combined
+    # ``make`` display field for existing templates/PDFs, but never infer one
+    # DMVIC field from the other.
+    d['vehicle_make'] = str(d.get('vehicle_make') or '').strip()
+    d['vehicle_model'] = str(d.get('vehicle_model') or '').strip()
+    d['make'] = str(d.get('make') or f"{d['vehicle_make']} {d['vehicle_model']}").strip()
+
     required = (
         'company', 'type_of_cover', 'type_of_certificate', 'product',
         'commencing_date', 'expiry_date',
         'policy_holder_name', 'phone', 'kra_pin',
-        'vehicle_reg', 'chassis_number', 'vehicle_body_type',
-        'seats'
+        'vehicle_reg', 'chassis_number', 'vehicle_body_type', 'seats'
     )
 
     missing = [k for k in required if not d.get(k)]
@@ -3996,6 +4077,8 @@ def generate_quotation():
                 engine_number,
                 vehicle_body_type,
                 make,
+                vehicle_make,
+                vehicle_model,
                 year_of_manufacture,
                 year_of_registration,
                 seats,
@@ -4008,6 +4091,7 @@ def generate_quotation():
             )
             VALUES (
                 %s,%s,%s,%s,%s,
+                %s,%s,
                 %s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
@@ -4035,6 +4119,8 @@ def generate_quotation():
             d.get("engine_number", "").upper(),
             d["vehicle_body_type"],
             d["make"],
+            d["vehicle_make"],
+            d["vehicle_model"],
             d.get("year_of_manufacture") or None,
             d.get("year_of_registration") or None,  # <-- Added missing parameter here
             int(d["seats"]),
@@ -4282,6 +4368,7 @@ def policy_dmvic_status(policy_no):
         "transaction_no":  row.get('dmvic_transaction_no'),
         "issuance_request_id": row.get('dmvic_issuance_request_id'),
         "error":           row.get('dmvic_error'),
+        "can_confirm":     bool(row.get('dmvic_status') == 'pending_manual' and row.get('dmvic_issuance_request_id')),
     })
 
 
@@ -4316,6 +4403,7 @@ def list_policies():
 
 @app.route('/api/policies/check-double-insurance')
 @login_required
+@limiter.limit("20 per minute")
 def check_double_insurance():
     """Search by vehicle registration number OR chassis number to see if a
     vehicle already has an active (non-expired, non-cancelled) policy —
@@ -4325,32 +4413,32 @@ def check_double_insurance():
     certificate issuance.
 
     Chassis number isn't stored on `policies` directly, so this joins to
-    `quotations` (via policies.quote_id) to search both fields at once.
-
-    In addition to our own local `policies` table (which only knows about
-    policies WE issued), this also queries DMVIC's live
-    ValidateDoubleInsurance endpoint (spec v1.8.1 section 4.11), which
-    checks against every certificate on file across ALL insurers/
-    intermediaries — catching double insurance that originated elsewhere,
-    not just re-issuance of our own policies.
+    `quotations` (via policies.quote_id) to search both fields at once. A
+    best-effort DMVIC lookup is returned separately, so agents can catch an
+    overlap created by another insurer before they create a new policy.
     """
     q = (request.args.get('query') or '').strip().upper()
     if not q or len(q) < 3:
         return jsonify({"error": "Enter at least 3 characters of the registration or chassis number"}), 400
 
-    # Optional — if the caller knows the specific period being quoted (e.g.
-    # the quotation wizard, mid-purchase), pass it through so DMVIC checks
-    # overlap against that exact window. Otherwise default to "right now"
-    # (today→tomorrow) — DMVIC requires policyenddate to be strictly after
-    # policystartdate, so a same-day today→today range is rejected with
-    # "COMMENCING DATE should be greater than EXPIRING DATE" (its wording
-    # is backwards, but the rule is: end must be after start).
     commencing_date = (request.args.get('commencing_date') or '').strip()
-    expiry_date     = (request.args.get('expiry_date') or '').strip()
-    today_str    = date.today().strftime('%d/%m/%Y')
-    tomorrow_str = (date.today() + timedelta(days=1)).strftime('%d/%m/%Y')
+    expiry_date = (request.args.get('expiry_date') or '').strip()
+    today = date.today()
+    today_str = today.strftime('%d/%m/%Y')
     dmvic_start = _dmvic_fmt_date(commencing_date) if commencing_date else today_str
-    dmvic_end   = _dmvic_fmt_date(expiry_date) if expiry_date else tomorrow_str
+    # DMVIC rejects a zero-day period. The dashboard has no period controls,
+    # so use the smallest valid range unless the caller supplies dates.
+    dmvic_end = _dmvic_fmt_date(expiry_date) if expiry_date else (today + timedelta(days=1)).strftime('%d/%m/%Y')
+    # The quotation wizard supplies the two identifiers separately. For the
+    # dashboard's one generic search field, never call DMVIC with a partial
+    # value and then incorrectly report the vehicle clear.
+    dmvic_reg = (request.args.get('vehicle_reg') or '').strip().upper()
+    dmvic_chassis = (request.args.get('chassis_number') or '').strip().upper()
+    if not dmvic_reg and not dmvic_chassis:
+        if re.fullmatch(r"[A-Z]{2,3}\d{3,4}[A-Z]?", q):
+            dmvic_reg = q
+        elif len(q) >= 6:
+            dmvic_chassis = q
 
     like = f"%{q}%"
     rows = query("""
@@ -4377,36 +4465,42 @@ def check_double_insurance():
         )
         r['is_double_insurance_risk'] = active_today
 
-    # Live DMVIC lookup — best-effort. If DMVIC is unreachable or the token
-    # can't be obtained, we still return the local results rather than
-    # failing the whole request; the frontend shows a note when this
-    # portion couldn't be checked.
-    dmvic_result = {"checked": False, "matches": [], "error": None}
-    token = dmvic_get_token()
+    dmvic = {"checked": False, "matches": [], "error": None}
+    token = dmvic_get_token() if (dmvic_reg or dmvic_chassis) else None
     if token:
-        # q could be a registration number or a chassis number — DMVIC
-        # accepts either (at least one is required), so send it as the
-        # registration number, the more common case when an agent types a
-        # full plate into this search box.
         live = dmvic_validate_double_insurance(
             token,
             policy_start_date=dmvic_start,
             policy_end_date=dmvic_end,
-            vehicle_reg=q,
+            vehicle_reg=dmvic_reg or None,
+            chassis_number=dmvic_chassis or None,
         )
+        if _dmvic_is_token_error(live):
+            log.warning("DMVIC pre-check rejected its token; refreshing once before reporting failure")
+            fresh_token = dmvic_get_token(force_refresh=True)
+            if fresh_token:
+                live = dmvic_validate_double_insurance(
+                    fresh_token,
+                    policy_start_date=dmvic_start,
+                    policy_end_date=dmvic_end,
+                    vehicle_reg=dmvic_reg or None,
+                    chassis_number=dmvic_chassis or None,
+                )
         if live.get("success"):
-            dmvic_result["checked"] = True
-            dmvic_result["matches"] = live.get("matches") or []
+            dmvic["checked"] = True
+            dmvic["matches"] = live.get("matches") or []
         else:
-            dmvic_result["error"] = live.get("error")
+            dmvic["error"] = live.get("error")
+    elif dmvic_reg or dmvic_chassis:
+        dmvic["error"] = "Could not obtain a DMVIC auth token."
     else:
-        dmvic_result["error"] = "Could not obtain DMVIC auth token"
+        dmvic["error"] = "Enter a full registration or chassis number for the live DMVIC check."
 
     return jsonify({
         "results": rows,
         "has_active_match": any(r['is_double_insurance_risk'] for r in rows),
-        "dmvic": dmvic_result,
-        "has_dmvic_match": bool(dmvic_result["matches"]),
+        "dmvic": dmvic,
+        "has_dmvic_match": bool(dmvic["matches"]),
     })
 
 
@@ -4960,36 +5054,46 @@ def list_pending_dmvic_confirmations():
 
 @app.route('/api/dmvic/confirm-issuance', methods=['POST'])
 @login_required
+@approved_required
 def dmvic_confirm_issuance_route():
-    """Approve or reject a DMVIC policy alert after a genuine manual review."""
     data = request.get_json() or {}
     policy_no = (data.get('policy_no') or '').strip()
-    is_approved = bool(data.get('is_approved'))
-    is_logbook_verified = bool(data.get('is_logbook_verified'))
-    is_vehicle_inspected = bool(data.get('is_vehicle_inspected'))
+    is_approved = data.get('is_approved')
+    is_logbook_verified = data.get('is_logbook_verified')
+    is_vehicle_inspected = data.get('is_vehicle_inspected')
     additional_comments = (data.get('additional_comments') or '').strip()
 
     if not policy_no:
         return jsonify({"error": "policy_no is required"}), 400
+    if not isinstance(is_approved, bool):
+        return jsonify({"error": "is_approved must be true or false"}), 400
+    if not isinstance(is_logbook_verified, bool) or not isinstance(is_vehicle_inspected, bool):
+        return jsonify({"error": "is_logbook_verified and is_vehicle_inspected must be explicitly true or false"}), 400
     if is_approved and not (is_logbook_verified and is_vehicle_inspected):
-        return jsonify({"error": "Confirm both the logbook verification and vehicle inspection before approving."}), 400
+        return jsonify({"error": "Both logbook verification and vehicle inspection must be "
+                                  "confirmed before approving issuance."}), 400
 
     policy = query("""SELECT policy_no, agent_id, dmvic_issuance_request_id, dmvic_status
                       FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
     if not policy:
         return jsonify({"error": "Policy not found"}), 404
-    if session.get('role') != 'admin' and policy.get('agent_id') != session.get('user_id'):
-        return jsonify({"error": "You do not have access to confirm this policy's DMVIC alert."}), 403
-    if policy.get('dmvic_status') != 'pending_confirmation' or not policy.get('dmvic_issuance_request_id'):
-        return jsonify({"error": "This policy has no pending DMVIC issuance confirmation."}), 409
+    if session['role'] != 'admin' and policy.get('agent_id') != session['user_id']:
+        return jsonify({"error": "You do not have access to this policy"}), 403
+    if policy.get('dmvic_status') != 'pending_manual':
+        return jsonify({"error": "This policy has no pending DMVIC issuance alert to act on."}), 409
+    issuance_request_id = policy.get('dmvic_issuance_request_id')
+    if not issuance_request_id:
+        return jsonify({"error": "No IssuanceRequestID stored for this policy — cannot confirm. "
+                                  "Check dmvic_error for details or re-attempt issuance."}), 409
 
     token = dmvic_get_token()
     if not token:
-        return jsonify({"error": "Could not obtain a DMVIC auth token"}), 502
+        return jsonify({"error": "Could not obtain DMVIC auth token. Please try again."}), 503
 
-    result = dmvic_confirm_certificate_issuance(
+    result = dmvic_issue_with_retry(
+        dmvic_confirm_certificate_issuance,
         token,
-        policy['dmvic_issuance_request_id'],
+        issuance_request_id=issuance_request_id,
         is_approved=is_approved,
         is_logbook_verified=is_logbook_verified,
         is_vehicle_inspected=is_vehicle_inspected,
@@ -4997,64 +5101,44 @@ def dmvic_confirm_issuance_route():
         usernames=session.get('username', ''),
     )
 
+    action = 'dmvic_confirm_issuance' if is_approved else 'dmvic_reject_issuance'
+    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+          (session['user_id'], action,
+           f"policy={policy_no} issuance_request_id={issuance_request_id} approved={is_approved}"), commit=True)
+
+    if not is_approved:
+        query("""UPDATE policies SET dmvic_status='failed',
+                  dmvic_error='Issuance rejected by agent after manual review.'
+                  WHERE policy_no=%s""", (policy_no,), commit=True)
+        cache_delete_prefix("cache:dashboard")
+        return jsonify({"success": True, "approved": False})
+
     if result.get('success'):
-        final_status = 'issued' if is_approved else 'failed'
         query("""UPDATE policies
-                  SET dmvic_status=%s,
+                  SET dmvic_status='issued',
                       dmvic_transaction_no=%s,
                       dmvic_certificate_no=%s,
                       dmvic_api_request_no=%s,
                       dmvic_issued_at=NOW(),
                       dmvic_error=NULL
                   WHERE policy_no=%s""",
-              (final_status, result.get('transaction_no'), result.get('certificate_no'),
+              (result.get('transaction_no'), result.get('certificate_no'),
                result.get('api_request_number'), policy_no), commit=True)
-    else:
-        # Network and validation failures remain reviewable and can be retried.
-        query("""UPDATE policies SET dmvic_status='pending_confirmation', dmvic_error=%s
-                  WHERE policy_no=%s""",
-              (result.get('error', 'Confirmation failed'), policy_no), commit=True)
+        cache_delete_prefix("cache:dashboard")
+        log.info("DMVIC certificate confirmed for %s: %s", policy_no, result.get('certificate_no'))
+        return jsonify({
+            "success": True,
+            "approved": True,
+            "certificate_no": result.get('certificate_no'),
+            "transaction_no": result.get('transaction_no'),
+        })
 
-    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
-          (session['user_id'], 'dmvic_confirm_issuance',
-           f"policy={policy_no} approved={is_approved} result={'success' if result.get('success') else 'failed'}"),
-          commit=True)
-    return jsonify(result)
+    error_msg = result.get('error', 'Confirmation failed.')
+    query("""UPDATE policies SET dmvic_error=%s WHERE policy_no=%s""",
+          (error_msg, policy_no), commit=True)
+    log.warning("DMVIC confirm-issuance failed for %s: %s", policy_no, error_msg)
+    return jsonify({"error": error_msg}), 502
 
-
-@app.route('/api/dmvic/record-policy-alert', methods=['POST'])
-@login_required
-@admin_required
-def record_dmvic_policy_alert():
-    """Queue an alert ID supplied by DMVIC Support for the normal review flow."""
-    data = request.get_json() or {}
-    policy_no = (data.get('policy_no') or '').strip()
-    issuance_request_id = (data.get('issuance_request_id') or '').strip()
-
-    if not policy_no:
-        return jsonify({"error": "policy_no is required"}), 400
-    if not re.fullmatch(r"[A-Za-z0-9-]{3,80}", issuance_request_id):
-        return jsonify({"error": "Enter the Issuance Request ID supplied by DMVIC Support."}), 400
-
-    policy = query("SELECT policy_no, dmvic_status FROM policies WHERE policy_no=%s",
-                   (policy_no,), fetchone=True)
-    if not policy:
-        return jsonify({"error": "Policy not found"}), 404
-    if policy.get('dmvic_status') == 'issued':
-        return jsonify({"error": "This policy already has an issued DMVIC certificate."}), 409
-
-    reason = ("DMVIC policy alert recorded from Support. Review the logbook and "
-              "vehicle inspection, then approve confirmation to issue the certificate.")
-    query("""UPDATE policies
-             SET dmvic_status='pending_confirmation',
-                 dmvic_issuance_request_id=%s,
-                 dmvic_error=%s
-             WHERE policy_no=%s""",
-          (issuance_request_id, reason, policy_no), commit=True)
-    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
-          (session['user_id'], 'dmvic_record_policy_alert',
-           f"policy={policy_no} issuance_request_id={issuance_request_id}"), commit=True)
-    return jsonify({"success": True, "message": "DMVIC alert added to the confirmation queue."})
 
 
 @app.route('/api/mpesa/status')

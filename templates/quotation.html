@@ -1115,16 +1115,27 @@ function pollDmvicStatus(policyNo) {
                 <span style="font-size:12px;">${esc(statusData.error || 'Unknown error — check Renewals for status.')}</span>`;
             return true;
         }
-        if (status === 'pending_manual') {
+     
+     
+     if (status === 'pending_manual') {
             box.className = 'dmvic-status-box manual';
+            window._dmvicStatusCache = window._dmvicStatusCache || {};
+            window._dmvicStatusCache[statusData.policy_no] = statusData;
+            const confirmBtn = statusData.can_confirm
+                ? `<button type="button" class="dmvic-confirm-btn" data-policy-no="${esc(statusData.policy_no)}"
+                     style="margin-top:8px; background:#2563eb; color:#fff; border:none; padding:7px 14px;
+                            border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;">
+                     <i class="fas fa-clipboard-check"></i> Review &amp; Confirm
+                   </button>`
+                : '';
             box.innerHTML = `<i class="fas fa-user-clock"></i> <strong>Held for Manual Issuance</strong><br>
-                <span style="font-size:12px;">${esc(statusData.error || 'Needs admin review before DMVIC issuance.')}</span>`;
-            return true;
-        }
-        if (status === 'pending_confirmation') {
-            box.className = 'dmvic-status-box manual';
-            box.innerHTML = `<i class="fas fa-exclamation-triangle"></i> <strong>DMVIC Data Review Required</strong><br>
-                <span style="font-size:12px;">${esc(statusData.error || 'Verify the logbook and insurer record, then re-quote. DMVIC does not offer manual approval for this alert.')}</span>`;
+                <span style="font-size:12px;">${esc(statusData.error || 'Needs review before DMVIC issuance.')}</span>
+                <br>${confirmBtn}`;
+            box.querySelectorAll('.dmvic-confirm-btn').forEach(b => {
+                b.addEventListener('click', () => {
+                    showQuotationDmvicConfirmation(window._dmvicStatusCache[b.dataset.policyNo]);
+                });
+            });
             return true;
         }
         if (status === 'unsupported') {
