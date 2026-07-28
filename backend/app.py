@@ -739,8 +739,18 @@ def _dmvic_clear_token_cache():
     _dmvic_token_cache["token"] = None
     _dmvic_token_cache["expires"] = None
 
-# ── Existing DMVIC functions below ──────────────────────────────────────────
 
+def _dmvic_clear_token_cache():
+    """Discard a token DMVIC has explicitly rejected.
+
+    DMVIC permits one active token per account.  Retaining a rejected token
+    until its advertised expiry makes every later request fail in exactly the
+    same way, even after the account itself has been restored.
+    """
+    _dmvic_token_cache["token"] = None
+    _dmvic_token_cache["expires"] = None
+
+# ── Existing DMVIC functions below ──────────────────────────────────────────
 def dmvic_get_token(force_refresh=False):
     """POST /api/v1/Account/Login. Caches the token in-process until
     shortly before its stated expiry so we don't log in on every single
@@ -1439,6 +1449,17 @@ def issue_dmvic_certificate(policy_no, quote_row):
     bucket = PRODUCT_TO_CERT_TYPE.get(quote_row.get('product'))
     product = quote_row.get('product')
     company = quote_row.get('company')
+
+    identity, missing_identity = dmvic_vehicle_identity(quote_row)
+    if missing_identity:
+        msg = ("DMVIC issuance held: verify and re-quote the "
+               f"{', '.join(missing_identity)} from the logbook. DMVIC compares "
+               "these values with previously issued certificates; the legacy "
+               "combined Make / Model field is not sent as a substitute.")
+        log.warning("DMVIC identity preflight held %s: %s", policy_no, missing_identity)
+        query("""UPDATE policies SET dmvic_status='pending_manual', dmvic_error=%s
+                  WHERE policy_no=%s""", (msg, policy_no), commit=True)
+        return
 
     identity, missing_identity = dmvic_vehicle_identity(quote_row)
     if missing_identity:
@@ -4368,7 +4389,6 @@ def policy_dmvic_status(policy_no):
         "transaction_no":  row.get('dmvic_transaction_no'),
         "issuance_request_id": row.get('dmvic_issuance_request_id'),
         "error":           row.get('dmvic_error'),
-        "can_confirm":     bool(row.get('dmvic_status') == 'pending_manual' and row.get('dmvic_issuance_request_id')),
     })
 
 
@@ -5054,91 +5074,68 @@ def list_pending_dmvic_confirmations():
 
 @app.route('/api/dmvic/confirm-issuance', methods=['POST'])
 @login_required
-@approved_required
 def dmvic_confirm_issuance_route():
+    """Retire the unsupported DMVIC policy-alert confirmation flow safely."""
     data = request.get_json() or {}
     policy_no = (data.get('policy_no') or '').strip()
-    is_approved = data.get('is_approved')
-    is_logbook_verified = data.get('is_logbook_verified')
-    is_vehicle_inspected = data.get('is_vehicle_inspected')
-    additional_comments = (data.get('additional_comments') or '').strip()
 
     if not policy_no:
         return jsonify({"error": "policy_no is required"}), 400
-    if not isinstance(is_approved, bool):
-        return jsonify({"error": "is_approved must be true or false"}), 400
-    if not isinstance(is_logbook_verified, bool) or not isinstance(is_vehicle_inspected, bool):
-        return jsonify({"error": "is_logbook_verified and is_vehicle_inspected must be explicitly true or false"}), 400
-    if is_approved and not (is_logbook_verified and is_vehicle_inspected):
-        return jsonify({"error": "Both logbook verification and vehicle inspection must be "
-                                  "confirmed before approving issuance."}), 400
 
     policy = query("""SELECT policy_no, agent_id, dmvic_issuance_request_id, dmvic_status
                       FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
     if not policy:
         return jsonify({"error": "Policy not found"}), 404
-    if session['role'] != 'admin' and policy.get('agent_id') != session['user_id']:
-        return jsonify({"error": "You do not have access to this policy"}), 403
-    if policy.get('dmvic_status') != 'pending_manual':
-        return jsonify({"error": "This policy has no pending DMVIC issuance alert to act on."}), 409
-    issuance_request_id = policy.get('dmvic_issuance_request_id')
-    if not issuance_request_id:
-        return jsonify({"error": "No IssuanceRequestID stored for this policy — cannot confirm. "
-                                  "Check dmvic_error for details or re-attempt issuance."}), 409
+    if session.get('role') != 'admin' and policy.get('agent_id') != session.get('user_id'):
+        return jsonify({"error": "You do not have access to confirm this policy's DMVIC alert."}), 403
+    if policy.get('dmvic_status') != 'pending_confirmation' or not policy.get('dmvic_issuance_request_id'):
+        return jsonify({"error": "This policy has no pending DMVIC issuance confirmation."}), 409
 
-    token = dmvic_get_token()
-    if not token:
-        return jsonify({"error": "Could not obtain DMVIC auth token. Please try again."}), 503
+    # DMVIC Support confirmed that this account has no manual policy
+    # confirmation process. Do not call a speculative endpoint or promise an
+    # approval path that cannot resolve an ER005/ER007 record mismatch.
+    msg = ("DMVIC does not provide manual confirmation for this policy alert. "
+           "Verify the certificate type, engine number, make and model against "
+           "the logbook and insurer record, then create a corrected quotation.")
+    query("""UPDATE policies SET dmvic_status='pending_manual', dmvic_error=%s
+              WHERE policy_no=%s""", (msg, policy_no), commit=True)
+    return jsonify({"error": msg}), 409
 
-    result = dmvic_issue_with_retry(
-        dmvic_confirm_certificate_issuance,
-        token,
-        issuance_request_id=issuance_request_id,
-        is_approved=is_approved,
-        is_logbook_verified=is_logbook_verified,
-        is_vehicle_inspected=is_vehicle_inspected,
-        additional_comments=additional_comments,
-        usernames=session.get('username', ''),
-    )
 
-    action = 'dmvic_confirm_issuance' if is_approved else 'dmvic_reject_issuance'
+@app.route('/api/dmvic/record-policy-alert', methods=['POST'])
+@login_required
+@admin_required
+def record_dmvic_policy_alert():
+    """Reject the obsolete recovery flow without sending DMVIC a bad request."""
+    data = request.get_json() or {}
+    policy_no = (data.get('policy_no') or '').strip()
+    issuance_request_id = (data.get('issuance_request_id') or '').strip()
+
+    if not policy_no:
+        return jsonify({"error": "policy_no is required"}), 400
+    if not re.fullmatch(r"[A-Za-z0-9-]{3,80}", issuance_request_id):
+        return jsonify({"error": "Enter the Issuance Request ID supplied by DMVIC Support."}), 400
+
+    policy = query("SELECT policy_no, dmvic_status FROM policies WHERE policy_no=%s",
+                   (policy_no,), fetchone=True)
+    if not policy:
+        return jsonify({"error": "Policy not found"}), 404
+    if policy.get('dmvic_status') == 'issued':
+        return jsonify({"error": "This policy already has an issued DMVIC certificate."}), 409
+
+    reason = ("DMVIC policy alert recorded from Support. DMVIC has confirmed that "
+              "manual confirmation is unavailable; verify the logbook and insurer "
+              "record, then create a corrected quotation.")
+    query("""UPDATE policies
+             SET dmvic_status='pending_manual',
+                 dmvic_issuance_request_id=%s,
+                 dmvic_error=%s
+             WHERE policy_no=%s""",
+          (issuance_request_id, reason, policy_no), commit=True)
     query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
-          (session['user_id'], action,
-           f"policy={policy_no} issuance_request_id={issuance_request_id} approved={is_approved}"), commit=True)
-
-    if not is_approved:
-        query("""UPDATE policies SET dmvic_status='failed',
-                  dmvic_error='Issuance rejected by agent after manual review.'
-                  WHERE policy_no=%s""", (policy_no,), commit=True)
-        cache_delete_prefix("cache:dashboard")
-        return jsonify({"success": True, "approved": False})
-
-    if result.get('success'):
-        query("""UPDATE policies
-                  SET dmvic_status='issued',
-                      dmvic_transaction_no=%s,
-                      dmvic_certificate_no=%s,
-                      dmvic_api_request_no=%s,
-                      dmvic_issued_at=NOW(),
-                      dmvic_error=NULL
-                  WHERE policy_no=%s""",
-              (result.get('transaction_no'), result.get('certificate_no'),
-               result.get('api_request_number'), policy_no), commit=True)
-        cache_delete_prefix("cache:dashboard")
-        log.info("DMVIC certificate confirmed for %s: %s", policy_no, result.get('certificate_no'))
-        return jsonify({
-            "success": True,
-            "approved": True,
-            "certificate_no": result.get('certificate_no'),
-            "transaction_no": result.get('transaction_no'),
-        })
-
-    error_msg = result.get('error', 'Confirmation failed.')
-    query("""UPDATE policies SET dmvic_error=%s WHERE policy_no=%s""",
-          (error_msg, policy_no), commit=True)
-    log.warning("DMVIC confirm-issuance failed for %s: %s", policy_no, error_msg)
-    return jsonify({"error": error_msg}), 502
-
+          (session['user_id'], 'dmvic_record_policy_alert',
+           f"policy={policy_no} issuance_request_id={issuance_request_id}"), commit=True)
+    return jsonify({"success": True, "message": "DMVIC alert recorded for data review; no manual confirmation request was sent."})
 
 
 @app.route('/api/mpesa/status')
