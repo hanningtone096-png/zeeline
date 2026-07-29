@@ -4389,8 +4389,8 @@ def policy_dmvic_status(policy_no):
         "transaction_no":  row.get('dmvic_transaction_no'),
         "issuance_request_id": row.get('dmvic_issuance_request_id'),
         "error":           row.get('dmvic_error'),
+        "can_confirm":     bool(row.get('dmvic_status') == 'pending_manual' and row.get('dmvic_issuance_request_id')),
     })
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POLICIES

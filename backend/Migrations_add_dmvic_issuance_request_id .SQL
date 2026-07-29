@@ -9,7 +9,7 @@ SET @db = DATABASE();
 SET @sql = (SELECT IF(
     (SELECT COUNT(*) FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA=@db AND TABLE_NAME='policies' AND COLUMN_NAME='dmvic_issuance_request_id') = 0,
-    'ALTER TABLE policies ADD COLUMN dmvic_issuance_request_id VARCHAR(64) NULL DEFAULT NULL
+    'ALTER TABLE policies ADD COLUMN dmvic_issuance_request_id VARCHAR(100) NULL DEFAULT NULL
         COMMENT ''DMVIC IssuanceRequestID for a pending policy-alert confirmation''',
     'SELECT 1'
 ));
