@@ -787,7 +787,6 @@ function goToReview() {
     if (!reg || !chassis || !body)
         return showError('Registration number, chassis number and body type are required.');
     if (seats < 1)                           return showError('Please enter the number of seats.');
-    if (!yor)                                return showError('Year of registration is required.');
     if (data.type_of_cover !== 'third_party_only' && value <= 0)
         return showError('Vehicle value is required for this cover type.');
     if (document.getElementById('tonnageRow').style.display !== 'none' && tonnage <= 0)

@@ -1203,7 +1203,7 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
                 "ClientID": DMVIC_CLIENT_ID,
             },
             cert=dmvic_cert_tuple(),
-            timeout=25,
+            timeout=60,
         )
         data = res.json()
     except Exception as e:
@@ -1314,7 +1314,7 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
                 "ClientID": DMVIC_CLIENT_ID,
             },
             cert=dmvic_cert_tuple(),
-            timeout=25,
+            timeout=60,
         )
         data = res.json()
     except Exception as e:
