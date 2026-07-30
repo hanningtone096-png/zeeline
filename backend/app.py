@@ -1789,17 +1789,14 @@ def issue_dmvic_certificate(policy_no, quote_row):
 # Monarch issues policy numbers as HDO|<class code>|<sequence>|<year>:
 #   - Private:    HDO|0700|533144|2026, incrementing by 1 per policy
 #   - Commercial: HDO|0800|012718|2026, incrementing by 1 per policy
-# Confirmed with Monarch (2026-07-30). Requires
-# migrations_add_monarch_sequences.sql to have been run.
+# Confirmed with Monarch (2026-07-30). MongoStore seeds and increments these
+# documents atomically; the SQL migration file is not used by this deployment.
 # ─────────────────────────────────────────────────────────────────────────────
 
 MONARCH_CLASS_CODES = {
     'private':    '0700',
     'commercial': '0800',
 }
-
-_monarch_seq_lock = threading.Lock()
-
 
 def monarch_policy_class(product):
     """Maps a product to Monarch's private/commercial policy-number series
@@ -1819,13 +1816,7 @@ def next_monarch_policy_no(policy_class):
     the given class ('private' or 'commercial'), formatted as
     HDO|<class_code>|<6-digit seq>|<year>."""
     class_code = MONARCH_CLASS_CODES[policy_class]
-    with _monarch_seq_lock:
-        query("""UPDATE monarch_policy_sequences
-                  SET last_seq = last_seq + 1
-                  WHERE policy_class=%s""", (policy_class,), commit=True)
-        row = query("""SELECT last_seq FROM monarch_policy_sequences
-                        WHERE policy_class=%s""", (policy_class,), fetchone=True)
-    seq = row['last_seq']
+    seq = mongo_store.next_monarch_policy_sequence(policy_class)
     year = datetime.now().year
     return f"HDO|{class_code}|{seq:06d}|{year}"
 
@@ -3135,7 +3126,7 @@ def safe_error_response(exc, message="Something went wrong. Please try again.", 
 def handle_500(e):
     ref = uuid.uuid4().hex[:10]
     log.error("[err-%s] Unhandled 500: %s", ref, e)
-    return jsonify({"error": "maintenance on the way be patient.", "reference": ref}), 500
+    return jsonify({"error": "We couldn't complete that request. Please try again.", "reference": ref}), 500
 
 
 # ─────────────────────────────────────────────────────────────────────────────

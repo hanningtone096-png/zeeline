@@ -195,6 +195,14 @@ class MongoStore:
         self.db.payments.create_index([("policy_no", ASCENDING)])
         self.db.payments.create_index([("reference", ASCENDING)])
         self.db.claims.create_index([("id", ASCENDING)], unique=True)
+        # MongoDB has no SQL migration step. Seed Monarch's independent
+        # policy-number counters once, without overwriting live sequences.
+        for policy_class, last_seq in {"private": 533143, "commercial": 12717}.items():
+            self.db.monarch_policy_sequences.update_one(
+                {"_id": policy_class},
+                {"$setOnInsert": {"policy_class": policy_class, "last_seq": last_seq}},
+                upsert=True,
+            )
 
     def _ensure_default_admin(self):
         if self.db.users.find_one({"role": "admin"}):
@@ -270,6 +278,18 @@ class MongoStore:
             return_document=ReturnDocument.BEFORE,
         )
         return _serialize(previous)
+
+    def next_monarch_policy_sequence(self, policy_class):
+        """Return the next Monarch class-specific policy sequence atomically."""
+        self._ensure_ready()
+        sequence = self.db.monarch_policy_sequences.find_one_and_update(
+            {"_id": policy_class},
+            {"$inc": {"last_seq": 1}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if not sequence or "last_seq" not in sequence:
+            raise RuntimeError(f"Monarch sequence is unavailable for {policy_class}")
+        return int(sequence["last_seq"])
 
     def _insert_doc(self, table, doc):
         doc = {k: _coerce_field(k, v) for k, v in doc.items()}
