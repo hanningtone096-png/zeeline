@@ -592,22 +592,22 @@ def notify_quotation(agent, client, vehicle, insurance, quote, pdf_bytes=None):
 def notify_underpayment_attempt(agent, policy_no, quoted_amount, attempted_amount, phone):
     shortfall = quoted_amount - attempted_amount
     html = f"""
-    <h2 style="color:#dc2626;">⚠️ Underpayment Attempt Blocked — {policy_no}</h2>
+    <h2 style="color:#d97706;">⚠️ Underpayment Warning — {policy_no}</h2>
     <p><b>Agent:</b> {agent.get('name','')}<br>
        <b>Agent Email:</b> {agent.get('email','')}<br>
        <b>Policy No:</b> {policy_no}<br>
        <b>Quoted/Due Amount:</b> KES {quoted_amount:,.0f}<br>
-       <b>Attempted Amount:</b> KES {attempted_amount:,.0f}<br>
+       <b>Amount Sent:</b> KES {attempted_amount:,.0f}<br>
        <b>Shortfall:</b> KES {shortfall:,.0f}<br>
        <b>M-Pesa Phone Used:</b> {phone}<br>
        <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-    <p>The system blocked this STK push because the amount entered was more than
-       KES {MAX_UNDERPAYMENT_ALLOWED:,} below the quoted/outstanding balance. No
-       prompt was sent to the client. This agent's account has been flagged for
-       admin review (see Agents in the admin dashboard).</p>
+    <p>This M-Pesa prompt was sent to the client for less than the quoted/outstanding
+       balance. The payment was NOT blocked — this is a notification only. This
+       agent's account has been flagged for admin review (see Agents in the admin
+       dashboard).</p>
     """
-    send_email(COMPANY_EMAIL, f"🚨 Underpayment Attempt — {policy_no}", html)
-    log.warning("Underpayment attempt blocked: policy=%s agent=%s quoted=%s attempted=%s",
+    send_email(COMPANY_EMAIL, f"⚠️ Underpayment Warning — {policy_no}", html)
+    log.warning("Underpayment warning sent: policy=%s agent=%s quoted=%s sent=%s",
                 policy_no, agent.get('email'), quoted_amount, attempted_amount)
 
 
@@ -4883,19 +4883,24 @@ def mpesa_stk():
     if balance <= 0:
         return jsonify({"error": "This policy has already been paid in full."}), 400
 
-    if amount < balance - MAX_UNDERPAYMENT_ALLOWED:
+    # Underpayment no longer blocks the STK push — the amount is fully
+    # agent-customizable, with no floor or ceiling. Any amount below the
+    # outstanding balance still triggers a warning email + account flag
+    # for admin visibility, but the payment always proceeds.
+    if amount < balance:
         agent = {
             'name':  session.get('name', session.get('username')),
             'email': session.get('email', ''),
         }
         shortfall = balance - amount
-        flag_reason = (f"Attempted to pay KES {amount:,.0f} against policy {policy_no}, "
+        flag_reason = (f"Paid KES {amount:,.0f} against policy {policy_no}, "
                        f"KES {shortfall:,.0f} below the outstanding balance of KES {balance:,.0f} "
                        f"(on {datetime.now().strftime('%Y-%m-%d %H:%M')}).")
 
         # Flag the agent's account: increment their running underpayment-attempt
         # counter and mark flagged=1 so admins can see/filter this in the agents
-        # list, in addition to the existing email alert below.
+        # list, in addition to the warning email below. This is informational
+        # only now — it never blocks the request.
         try:
             query("""UPDATE users
                      SET flagged=1, flagged_reason=%s, flagged_at=NOW(),
@@ -4912,17 +4917,8 @@ def mpesa_stk():
                 agent, policy_no, balance, amount, phone)
 
         query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
-              (session['user_id'], 'underpayment_blocked',
+              (session['user_id'], 'underpayment_warning',
                f"policy={policy_no} balance={balance} attempted={amount}"), commit=True)
-
-        return jsonify({
-            "error": f"Amount is more than KES {MAX_UNDERPAYMENT_ALLOWED:,} below the "
-                     f"outstanding balance of KES {balance:,.0f}. This attempt has been "
-                     f"flagged and reported."
-        }), 400
-
-    if amount > balance + 10:
-        return jsonify({"error": f"Amount exceeds outstanding balance of KES {balance:,.0f}"}), 400
 
     result = mpesa_stk_push(phone=phone, amount=amount,
                             account_ref=policy_no, description='Insurance Premium')
