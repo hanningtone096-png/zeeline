@@ -1789,7 +1789,51 @@ def issue_dmvic_certificate(policy_no, quote_row):
                       WHERE policy_no=%s""",
                   (result.get('error', 'Unknown DMVIC error'), policy_no), commit=True)
             log.warning("DMVIC issuance failed for %s: %s", policy_no, result.get('error'))
+# ─────────────────────────────────────────────────────────────────────────────
+# MONARCH POLICY NUMBER SEQUENCES
+#
+# Monarch issues policy numbers as HDO|<class code>|<sequence>|<year>:
+#   - Private:    HDO|0700|533144|2026, incrementing by 1 per policy
+#   - Commercial: HDO|0800|012718|2026, incrementing by 1 per policy
+# Confirmed with Monarch (2026-07-30). Requires
+# migrations_add_monarch_sequences.sql to have been run.
+# ─────────────────────────────────────────────────────────────────────────────
 
+MONARCH_CLASS_CODES = {
+    'private':    '0700',
+    'commercial': '0800',
+}
+
+_monarch_seq_lock = threading.Lock()
+
+
+def monarch_policy_class(product):
+    """Maps a product to Monarch's private/commercial policy-number series
+    using the same bucket classification DMVIC issuance uses. Returns None
+    for products that aren't private or commercial (e.g. PSV, motorcycle) —
+    callers must handle that case."""
+    bucket = PRODUCT_TO_CERT_TYPE.get(product)
+    if bucket == 'general':
+        return 'private'
+    if bucket == 'commercial':
+        return 'commercial'
+    return None
+
+
+def next_monarch_policy_no(policy_class):
+    """Atomically increments and returns the next Monarch policy number for
+    the given class ('private' or 'commercial'), formatted as
+    HDO|<class_code>|<6-digit seq>|<year>."""
+    class_code = MONARCH_CLASS_CODES[policy_class]
+    with _monarch_seq_lock:
+        query("""UPDATE monarch_policy_sequences
+                  SET last_seq = last_seq + 1
+                  WHERE policy_class=%s""", (policy_class,), commit=True)
+        row = query("""SELECT last_seq FROM monarch_policy_sequences
+                        WHERE policy_class=%s""", (policy_class,), fetchone=True)
+    seq = row['last_seq']
+    year = datetime.now().year
+    return f"HDO|{class_code}|{seq:06d}|{year}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EMAIL OTP VERIFICATION (registration email confirmation)
@@ -4326,7 +4370,17 @@ def buy_cover():
     else:
         client_id = client['id']
 
-    policy_no = f"POL-{date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
+    if (q.get('company') or '').lower() == 'monarch':
+        m_class = monarch_policy_class(q.get('product'))
+        if m_class:
+            policy_no = next_monarch_policy_no(m_class)
+        else:
+            policy_no = f"POL-{date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
+            log.warning("Monarch product '%s' has no assigned policy-number series "
+                        "(private/commercial only) — falling back to internal format for %s",
+                        q.get('product'), policy_no)
+    else:
+        policy_no = f"POL-{date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
     query("""
         INSERT INTO policies
             (policy_no, quote_id, agent_id, client_id,
