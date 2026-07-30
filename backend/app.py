@@ -1426,9 +1426,9 @@ def dmvic_vehicle_identity(quote_row):
 
 def issue_dmvic_certificate(policy_no, quote_row):
     """
-    Attempts DMVIC certificate issuance for a newly-created policy. Called
-    from buy_cover() on a background worker so the agent isn't blocked
-    waiting on DMVIC's response.
+    Attempts DMVIC certificate issuance for a paid policy. Called after the
+    payment settlement transition on a background worker so the agent isn't
+    blocked waiting on DMVIC's response.
 
     Confirmed with the business (2026-07-22): four product categories are
     now issued through DMVIC's Intermediary endpoints —
@@ -1446,20 +1446,14 @@ def issue_dmvic_certificate(policy_no, quote_row):
     the policies table) — every UPDATE below will fail with an
     unknown-column error until that migration is applied.
     """
+    policy = query("SELECT status FROM policies WHERE policy_no=%s", (policy_no,), fetchone=True)
+    if not policy or policy.get('status') != 'active':
+        log.warning("DMVIC issuance skipped for unpaid or missing policy %s", policy_no)
+        return
+
     bucket = PRODUCT_TO_CERT_TYPE.get(quote_row.get('product'))
     product = quote_row.get('product')
     company = quote_row.get('company')
-
-    identity, missing_identity = dmvic_vehicle_identity(quote_row)
-    if missing_identity:
-        msg = ("DMVIC issuance held: verify and re-quote the "
-               f"{', '.join(missing_identity)} from the logbook. DMVIC compares "
-               "these values with previously issued certificates; the legacy "
-               "combined Make / Model field is not sent as a substitute.")
-        log.warning("DMVIC identity preflight held %s: %s", policy_no, missing_identity)
-        query("""UPDATE policies SET dmvic_status='pending_manual', dmvic_error=%s
-                  WHERE policy_no=%s""", (msg, policy_no), commit=True)
-        return
 
     identity, missing_identity = dmvic_vehicle_identity(quote_row)
     if missing_identity:
@@ -4326,12 +4320,50 @@ def list_quotations():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PAYMENT SETTLEMENT → POLICY ACTIVATION + DMVIC ISSUANCE
+#
+# A completed payment may be reported by both the ArchPay callback and the
+# agent-facing verification endpoint. MongoStore makes the pending_payment →
+# active transition atomic, so only the first confirmed report queues DMVIC.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def activate_paid_policy_and_enqueue_dmvic(policy_no, *, source, reference, user_id=None):
+    """Activate a newly settled policy once and queue its DMVIC certificate.
+
+    Returns True only for the caller that performed the payment transition.
+    Repeated callbacks and status queries therefore stay harmless.
+    """
+    policy = mongo_store.activate_policy_after_payment(policy_no)
+    if not policy:
+        return False
+
+    quote = query("SELECT * FROM quotations WHERE id=%s", (policy.get('quote_id'),), fetchone=True)
+    if quote:
+        enqueue("dmvic_issue_certificate", issue_dmvic_certificate, policy_no, quote)
+    else:
+        log.error("Payment settled for %s but quotation %s was not found", policy_no, policy.get('quote_id'))
+        query("""UPDATE policies
+                  SET dmvic_status='failed', dmvic_error=%s
+                  WHERE policy_no=%s""",
+              ("Payment confirmed, but the quotation required for DMVIC issuance is unavailable.", policy_no),
+              commit=True)
+
+    if user_id is None:
+        query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
+              (source, f"policy={policy_no} ref={reference}"), commit=True)
+    else:
+        query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+              (user_id, source, f"policy={policy_no} ref={reference}"), commit=True)
+    cache_delete_prefix("cache:dashboard")
+    cache_delete_prefix("cache:reports_summary")
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # BUY COVER → POLICY
 #
-# FIXED in v2.5: this is the function that actually has policy_no and q
-# in scope — DMVIC issuance is now correctly wired here (see the
-# enqueue(...) call near the end), not in add_client() where it was
-# mistakenly pasted before.
+# This creates a pending-payment policy only. The verified payment transition
+# above is the sole path that queues DMVIC issuance.
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.route('/api/quotations/buy', methods=['POST'])
@@ -4385,8 +4417,8 @@ def buy_cover():
         INSERT INTO policies
             (policy_no, quote_id, agent_id, client_id,
              vehicle_reg, type_of_cover, commencing_date, expiry_date,
-             total_payable, status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'active')
+             total_payable, status, dmvic_status)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending_payment','awaiting_payment')
     """, (
         policy_no, quote_id, q['agent_id'], client_id,
         q.get('vehicle_reg',''), q['type_of_cover'],
@@ -4401,12 +4433,6 @@ def buy_cover():
         INSERT INTO payments (policy_no, amount, status, method)
         VALUES (%s, %s, 'pending', 'manual')
     """, (policy_no, q['total_payable']), commit=True)
-
-    # DMVIC certificate issuance — async on the background worker pool,
-    # same pattern as PDF/email in generate_quotation() above. `q` is the
-    # full quotations row, which has everything issue_dmvic_certificate
-    # needs (product, cover, dates, vehicle + policyholder details).
-    enqueue("dmvic_issue_certificate", issue_dmvic_certificate, policy_no, q)
 
     cache_delete_prefix("cache:dashboard")
     cache_delete_prefix("cache:reports_summary")
@@ -4423,12 +4449,12 @@ def buy_cover():
 @login_required
 def policy_dmvic_status(policy_no):
     """Lightweight poll target for the quotation wizard's post-purchase
-    screen. DMVIC issuance runs on a background worker (see buy_cover()
-    above) so the agent isn't blocked waiting on DMVIC's response — the
+    screen. DMVIC issuance starts only after payment settlement, then runs on
+    a background worker so the agent isn't blocked waiting on its response — the
     frontend polls this every few seconds until dmvic_status settles into
     'issued' / 'failed' / 'pending_manual' / 'pending_confirmation' /
     'unsupported'."""
-    row = query("""SELECT policy_no, agent_id, dmvic_status, dmvic_certificate_no,
+    row = query("""SELECT policy_no, agent_id, status, dmvic_status, dmvic_certificate_no,
                           dmvic_transaction_no, dmvic_issuance_request_id, dmvic_error
                    FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
     if not row:
@@ -4438,6 +4464,7 @@ def policy_dmvic_status(policy_no):
 
     return jsonify({
         "policy_no":       row.get('policy_no'),
+        "policy_status":   row.get('status'),
         "dmvic_status":    row.get('dmvic_status'),
         "certificate_no":  row.get('dmvic_certificate_no'),
         "transaction_no":  row.get('dmvic_transaction_no'),
@@ -5011,6 +5038,9 @@ def mpesa_query():
             return jsonify({"error": "Policy not found"}), 404
         if session['role'] != 'admin' and policy['agent_id'] != session['user_id']:
             return jsonify({"error": "You do not have access to this policy"}), 403
+        payment = query("SELECT policy_no FROM payments WHERE reference=%s", (checkout_request_id,), fetchone=True)
+        if not payment or payment.get('policy_no') != policy_no:
+            return jsonify({"error": "Checkout request does not belong to this policy"}), 404
     elif session['role'] != 'admin':
         return jsonify({"error": "policy_no required"}), 400
 
@@ -5018,11 +5048,12 @@ def mpesa_query():
     if result.get('success') and policy_no:
         query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
               (checkout_request_id,), commit=True)
-        query("UPDATE policies SET status='active', updated_at=NOW() WHERE policy_no=%s",
-              (policy_no,), commit=True)
-        query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
-              (session.get('user_id'), 'mpesa_payment_confirmed',
-               f"policy={policy_no} ref={checkout_request_id}"), commit=True)
+        activate_paid_policy_and_enqueue_dmvic(
+            policy_no,
+            source='mpesa_payment_confirmed',
+            reference=checkout_request_id,
+            user_id=session.get('user_id'),
+        )
     return jsonify(result)
 
 
@@ -5073,10 +5104,11 @@ def mpesa_callback(secret):
             mpesa_ref = receipt or ref
             query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
                   (ref,), commit=True)
-            query("UPDATE policies SET status='active', updated_at=NOW() WHERE policy_no=%s",
-                  (pmt['policy_no'],), commit=True)
-            query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
-                  ('archpay_callback_confirmed', f"policy={pmt['policy_no']} ref={mpesa_ref or ref}"), commit=True)
+            activate_paid_policy_and_enqueue_dmvic(
+                pmt['policy_no'],
+                source='archpay_callback_confirmed',
+                reference=mpesa_ref,
+            )
         elif status in ('failed', 'cancelled', 'timeout'):
             query("UPDATE payments SET status=%s WHERE reference=%s", (status, ref), commit=True)
             query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",

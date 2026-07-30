@@ -913,7 +913,7 @@ async function generateQuote() {
                 <div style="margin-top:20px; padding-top:16px; border-top:1px solid #bbf7d0;">
                     <p style="font-size:13px; color:#064e3b; margin:0 0 10px;">
                         <i class="fas fa-info-circle"></i>
-                        Ready to proceed? Buy Cover to create an active policy for this client.
+                        Ready to proceed? Buy Cover to create the policy, then collect payment to activate it.
                     </p>
                     <button class="buy-cover-btn" id="buyCoverBtn" onclick="buyCover('${esc(r.quote.id)}')">
                         <i class="fas fa-shield-alt"></i> BUY COVER — KES ${Number(r.quote.total_payable).toLocaleString()}
@@ -1056,7 +1056,7 @@ async function buyCover(quoteId) {
                 <p style="font-family:monospace; font-size:15px; margin:0 0 12px;">${esc(r.policy_no)}</p>
 
                 <div id="dmvicStatusBox" class="dmvic-status-box pending">
-                    <i class="fas fa-spinner fa-spin"></i> Issuing DMVIC certificate…
+                    <i class="fas fa-clock"></i> Awaiting confirmed payment. DMVIC certificate issuance starts automatically after payment.
                 </div>
 
                 <p style="font-size:13px; color:#475569; margin:14px 0 10px;">Pay the premium via M-Pesa:</p>
@@ -1079,10 +1079,6 @@ async function buyCover(quoteId) {
                 </a>
             </div>`;
 
-        // ── NEW: poll DMVIC issuance status (it runs on a background
-        // worker, so it isn't done the instant buy_cover() returns).
-        pollDmvicStatus(r.policy_no);
-
     } catch (err) {
         msg.style.color = '#dc2626';
         msg.innerText = 'Network error — please try again.';
@@ -1101,6 +1097,12 @@ function pollDmvicStatus(policyNo) {
 
     const render = (statusData) => {
         const status = statusData.dmvic_status;
+
+        if (status === 'awaiting_payment' || statusData.policy_status === 'pending_payment') {
+            box.className = 'dmvic-status-box pending';
+            box.innerHTML = `<i class="fas fa-clock"></i> Awaiting confirmed payment. DMVIC certificate issuance starts automatically after payment.`;
+            return true;
+        }
 
         if (status === 'issued') {
             box.className = 'dmvic-status-box issued';
@@ -1297,8 +1299,9 @@ async function initiateMpesa(policyNo, amount) {
                     clearInterval(poll);
                     msgEl.style.color = '#15803d';
                     msgEl.innerHTML   = `<strong><i class="fas fa-check-circle"></i> Payment Confirmed!</strong><br>
-                        <span style="font-size:12px; color:#64748b;">Policy is now active.</span>`;
+                        <span style="font-size:12px; color:#64748b;">Policy is now active. Preparing the DMVIC certificate…</span>`;
                     btn.style.display = 'none';
+                    pollDmvicStatus(policyNo);
                 } else if (qd.result_code && qd.result_code !== '0' && attempts >= 2) {
                     clearInterval(poll);
                     msgEl.style.color = '#dc2626';

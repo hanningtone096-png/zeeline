@@ -187,6 +187,7 @@ class MongoStore:
         self.db.quotations.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])
         self.db.policies.create_index([("policy_no", ASCENDING)], unique=True)
         self.db.policies.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])
+        self.db.policies.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
         # MongoDB documents are schema-flexible, so the DMVIC issuance-request
         # field needs no ALTER TABLE equivalent. This sparse index is the
         # Mongo counterpart of the SQL migration and keeps the review queue fast.
@@ -230,6 +231,11 @@ class MongoStore:
             doc.setdefault("underpayment_attempts", 0)
         if table == "quotations":
             doc.setdefault("status", "pending")
+        if table == "policies":
+            # New policies are not cover until payment has been verified.
+            # MongoDB is schema-flexible, so this is the migration-equivalent
+            # default for documents created without an explicit status.
+            doc.setdefault("status", "pending_payment")
         if table == "payments":
             doc.setdefault("status", "pending")
             doc.setdefault("method", "manual")
@@ -241,6 +247,29 @@ class MongoStore:
         if table == "verification_codes":
             doc.setdefault("used", 0)
         return doc
+
+    def activate_policy_after_payment(self, policy_no):
+        """Atomically activate one newly paid policy and claim its DMVIC job.
+
+        The payment verifier and webhook can report the same settlement.  The
+        pending_payment predicate makes this transition idempotent: exactly one
+        caller receives the pre-transition policy document and may enqueue
+        certificate issuance.
+        """
+        self._ensure_ready()
+        previous = self.db.policies.find_one_and_update(
+            {"policy_no": policy_no, "status": "pending_payment"},
+            {
+                "$set": {
+                    "status": "active",
+                    "dmvic_status": "queued",
+                    "dmvic_error": None,
+                    "updated_at": _now(),
+                }
+            },
+            return_document=ReturnDocument.BEFORE,
+        )
+        return _serialize(previous)
 
     def _insert_doc(self, table, doc):
         doc = {k: _coerce_field(k, v) for k, v in doc.items()}
