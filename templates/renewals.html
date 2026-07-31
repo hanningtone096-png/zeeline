@@ -8,19 +8,21 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
 /* Pipeline */
-.renewals-pipeline { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; align-items:start; }
+.renewals-pipeline { display:grid; grid-template-columns:repeat(4,1fr); gap:20px; align-items:start; }
 @media(max-width:960px){ .renewals-pipeline { grid-template-columns:1fr; } }
 
 .pipeline-column { border-radius:12px; padding:16px; }
 .status-critical { background:#fef2f2; border:1px solid #fecaca; }
 .status-warning  { background:#fffbeb; border:1px solid #fde68a; }
 .status-info     { background:#eff6ff; border:1px solid #bfdbfe; }
+.status-current  { background:#f0fdf4; border:1px solid #bbf7d0; }
 
 .column-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
 .column-header h3 { margin:0; font-size:14px; font-weight:600; }
 .status-critical .column-header h3 { color:#991b1b; }
 .status-warning  .column-header h3 { color:#92400e; }
 .status-info     .column-header h3 { color:#1e40af; }
+.status-current  .column-header h3 { color:#166534; }
 
 .count-badge {
     width:24px; height:24px; border-radius:50%;
@@ -30,6 +32,7 @@
 .status-critical .count-badge { background:#ef4444; }
 .status-warning  .count-badge { background:#f59e0b; }
 .status-info     .count-badge { background:#3b82f6; }
+.status-current  .count-badge { background:#16a34a; }
 
 .renewal-card {
     background:#fff; border-radius:10px; padding:14px; margin-bottom:10px;
@@ -162,6 +165,7 @@ function bucketRenewals(renewals) {
     const lapsed    = [];
     const sevenDay  = [];
     const thirtyDay = [];
+    const activeCover = [];
     renewals.forEach(r => {
         const days = daysUntil(r.expiry_date);
         if (days === null) return;
@@ -169,8 +173,9 @@ function bucketRenewals(renewals) {
         if (days < 0)        lapsed.push(r);
         else if (days <= 7)  sevenDay.push(r);
         else if (days <= 30) thirtyDay.push(r);
+        else                 activeCover.push(r);
     });
-    return { lapsed, sevenDay, thirtyDay };
+    return { lapsed, sevenDay, thirtyDay, activeCover };
 }
 
 function dayLabel(days) {
@@ -193,7 +198,9 @@ function buildCard(r) {
                 onclick="notifyClient('${ph}','${esc(r.client_name||'')}','${esc(r.vehicle_reg||'')}')">
                 <i class="fab fa-whatsapp"></i> Remind
            </button>`
-        : `<button class="action-btn-mini renew-now"
+        : r.days > 30
+            ? `<span style="font-size:12px;font-weight:700;color:#15803d;"><i class="fas fa-shield-alt"></i> Active cover</span>`
+            : `<button class="action-btn-mini renew-now"
                 onclick="renewPolicy('${esc(r.id||'')}','${esc(r.client_name||'')}')">
                 <i class="fas fa-sync-alt"></i> Renew
            </button>`;
@@ -218,10 +225,10 @@ function buildCard(r) {
 }
 
 function renderPipeline(renewals) {
-    const { lapsed, sevenDay, thirtyDay } = bucketRenewals(renewals);
+    const { lapsed, sevenDay, thirtyDay, activeCover } = bucketRenewals(renewals);
     const pv = document.getElementById('pipelineView');
 
-    renderSummary(lapsed, sevenDay, thirtyDay);
+    renderSummary(lapsed, sevenDay, thirtyDay, activeCover);
 
     pv.innerHTML = `
         <div class="pipeline-column status-critical">
@@ -253,6 +260,15 @@ function renderPipeline(renewals) {
                 ${thirtyDay.length ? thirtyDay.map(buildCard).join('') : '<p style="color:#94a3b8;font-size:13px;">No upcoming renewals.</p>'}
             </div>
         </div>
+        <div class="pipeline-column status-current">
+            <div class="column-header">
+                <h3><i class="fas fa-shield-alt"></i> Active Cover</h3>
+                <span class="count-badge">${activeCover.length}</span>
+            </div>
+            <div class="card-stack">
+                ${activeCover.length ? activeCover.map(buildCard).join('') : '<p style="color:#94a3b8;font-size:13px;">No active cover outside the renewal window.</p>'}
+            </div>
+        </div>
     `;
 }
 
@@ -266,6 +282,7 @@ function renderTable(renewals) {
         const days = r.days !== undefined ? r.days : daysUntil(r.expiry_date);
         const { text, cls } = dayLabel(days);
         const isLapsed = days < 0;
+        const isActiveCover = days > 30;
         return `
         <tr style="border-bottom:1px solid #f1f5f9;">
             <td style="padding:10px 12px;">${esc(r.client_name||'—')}<br><span style="font-size:12px;color:#64748b;">${esc(r.phone||'')}</span></td>
@@ -277,14 +294,16 @@ function renderTable(renewals) {
             <td style="padding:10px 12px;">
                 ${isLapsed
                     ? `<button class="action-btn-mini notify" onclick="notifyClient('${esc(r.phone||'')}','${esc(r.client_name||'')}','${esc(r.vehicle_reg||'')}')"><i class="fab fa-whatsapp"></i> Remind</button>`
-                    : `<button class="action-btn-mini renew-now" onclick="renewPolicy('${esc(r.id||'')}','${esc(r.client_name||'')}')"><i class="fas fa-sync-alt"></i> Renew</button>`
+                    : isActiveCover
+                        ? `<span style="font-size:12px;font-weight:700;color:#15803d;"><i class="fas fa-shield-alt"></i> Active cover</span>`
+                        : `<button class="action-btn-mini renew-now" onclick="renewPolicy('${esc(r.id||'')}','${esc(r.client_name||'')}')"><i class="fas fa-sync-alt"></i> Renew</button>`
                 }
             </td>
         </tr>`;
     }).join('');
 }
 
-function renderSummary(lapsed, sevenDay, thirtyDay) {
+function renderSummary(lapsed, sevenDay, thirtyDay, activeCover) {
     document.getElementById('summaryBar').innerHTML = `
         <div class="summary-pill">
             <strong style="color:#dc2626;">${lapsed.length}</strong>
@@ -297,6 +316,10 @@ function renderSummary(lapsed, sevenDay, thirtyDay) {
         <div class="summary-pill">
             <strong style="color:#2563eb;">${thirtyDay.length}</strong>
             <span>Expiring in 30 days</span>
+        </div>
+        <div class="summary-pill">
+            <strong style="color:#15803d;">${activeCover.length}</strong>
+            <span>Active cover</span>
         </div>
         <div class="summary-pill">
             <strong>${allRenewals.length}</strong>
@@ -313,7 +336,7 @@ function setView(btn, view) {
     document.getElementById('tableView').style.display    = view === 'table'    ? 'block' : 'none';
     if (view === 'table') {
         const bucketed = bucketRenewals([...allRenewals]);
-        renderTable([...bucketed.lapsed, ...bucketed.sevenDay, ...bucketed.thirtyDay]);
+        renderTable([...bucketed.lapsed, ...bucketed.sevenDay, ...bucketed.thirtyDay, ...bucketed.activeCover]);
     }
 }
 

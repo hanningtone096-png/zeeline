@@ -4993,11 +4993,16 @@ def update_claim_status(claim_id):
 @app.route('/api/renewals/list')
 @login_required
 def list_renewals():
+    """Return active cover plus the renewal queue.
+
+    The Mongo document is visible here only after the atomic payment
+    transition has set ``status`` to ``active``. The page sorts current cover
+    separately from policies that are actually due for renewal.
+    """
     if session['role'] == 'admin':
         rows = query("""
             SELECT p.id, p.policy_no, p.vehicle_reg, p.type_of_cover,
-                   p.expiry_date, p.total_payable AS premium,
-                   DATEDIFF(p.expiry_date, CURDATE()) AS days_remaining,
+                   p.expiry_date, p.total_payable AS premium, p.status,
                    CONCAT(c.first_name,' ',c.last_name) AS client_name,
                    c.phone,
                    COALESCE(q.make, '') AS vehicle_make,
@@ -5006,15 +5011,12 @@ def list_renewals():
             LEFT JOIN clients c ON c.id = p.client_id
             LEFT JOIN quotations q ON q.id = p.quote_id
             LEFT JOIN users u ON u.id = p.agent_id
-            WHERE  DATEDIFF(p.expiry_date, CURDATE()) <= 30
-               OR  p.expiry_date < CURDATE()
             ORDER BY p.expiry_date ASC
         """)
     else:
         rows = query("""
             SELECT p.id, p.policy_no, p.vehicle_reg, p.type_of_cover,
-                   p.expiry_date, p.total_payable AS premium,
-                   DATEDIFF(p.expiry_date, CURDATE()) AS days_remaining,
+                   p.expiry_date, p.total_payable AS premium, p.status,
                    CONCAT(c.first_name,' ',c.last_name) AS client_name,
                    c.phone,
                    COALESCE(q.make, '') AS vehicle_make
@@ -5022,11 +5024,9 @@ def list_renewals():
             LEFT JOIN clients c ON c.id = p.client_id
             LEFT JOIN quotations q ON q.id = p.quote_id
             WHERE  p.agent_id = %s
-              AND (DATEDIFF(p.expiry_date, CURDATE()) <= 30
-               OR  p.expiry_date < CURDATE())
             ORDER BY p.expiry_date ASC
         """, (session['user_id'],))
-    return jsonify({"renewals": rows})
+    return jsonify({"renewals": [row for row in rows if row.get('status') == 'active']})
 
 
 @app.route('/api/renewals/renew', methods=['POST'])
