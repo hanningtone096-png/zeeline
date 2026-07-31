@@ -197,6 +197,23 @@
 <h2><i class="fas fa-file-alt" style="color:#2563eb;"></i> Step 1 — Insurance Details</h2>
 
 <div class="form-group">
+    <label>Business Type *</label>
+    <div class="product-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));">
+        <div class="select-card selected" id="btNew" data-value="new">New Business</div>
+        <div class="select-card" id="btExtension" data-value="extension">Extension</div>
+    </div>
+</div>
+
+<div class="form-group" id="extensionLookupRow" style="display:none;">
+    <label for="ext_vehicle_reg">Vehicle Registration (existing installment policy) *</label>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input id="ext_vehicle_reg" placeholder="KBC 123X" style="text-transform:uppercase; flex:1; min-width:180px;">
+        <button type="button" onclick="lookupExtension()"><i class="fas fa-search"></i> Fetch Details</button>
+    </div>
+    <small id="extLookupMsg" style="color:#64748b;"></small>
+</div>
+
+<div class="form-group">
     <label>Insurance Company *</label>
     <div class="insurer-grid">
         <div class="insurer-card" data-value="monarch">
@@ -236,10 +253,8 @@
             <option value="30_days">30 Days</option>
             <option value="14_days">14 Days</option>
             <option value="7_days">7 Days</option>
+            <option value="inst_2">2 Instalments</option>
             <option value="inst_3">3 Instalments</option>
-            <option value="inst_6">6 Instalments</option>
-            <option value="inst_9">9 Instalments</option>
-            <option value="inst_10">2 Instalments</option>
         </select>
     </div>
 </div>
@@ -268,6 +283,7 @@
             <input type="date" id="expiry_date">
         </div>
     </div>
+    <small id="validityHint" style="color:#64748b; display:none;"></small>
 </div>
 
 <div class="nav-buttons">
@@ -447,7 +463,8 @@ function withCsrf(headers = {}) {
 
 const data = {
     company:null, type_of_cover:'', type_of_certificate:'',
-    product:null, sub_type:null, pax:0, commencing_date:'', expiry_date:'',
+    product:null, sub_type:null, pax:0, business_type:'new', parent_policy_no:null,
+    commencing_date:'', expiry_date:'',
     policy_holder_name:'', email:'', phone:'', kra_pin:'', id_number:'', postal_address:'',
     vehicle_reg:'', chassis_number:'', vehicle_body_type:'',
     engine_number:'', make:'', vehicle_make:'', vehicle_model:'', seats:0, vehicle_value:0, tonnage:0,
@@ -538,17 +555,143 @@ function clearError() {
     el.style.display = 'none';
 }
 
+function isInstallmentPlan() {
+    return data.type_of_certificate === 'inst_2' || data.type_of_certificate === 'inst_3';
+}
+
+function dateFromIso(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return null;
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+}
+
+function isoDate(value) {
+    return value.toISOString().slice(0, 10);
+}
+
+function addCalendarMonth(value) {
+    const day = value.getUTCDate();
+    value.setUTCDate(1);
+    value.setUTCMonth(value.getUTCMonth() + 1);
+    const lastDay = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0)).getUTCDate();
+    value.setUTCDate(Math.min(day, lastDay));
+    return value;
+}
+
+function addOneYear(value) {
+    const day = value.getUTCDate();
+    value.setUTCDate(1);
+    value.setUTCFullYear(value.getUTCFullYear() + 1);
+    const lastDay = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0)).getUTCDate();
+    value.setUTCDate(Math.min(day, lastDay));
+    return value;
+}
+
+function setExtensionValidity(parent) {
+    const parentEnd = dateFromIso(parent?.expiry_date);
+    const originalStart = dateFromIso(parent?.original_commencing_date || parent?.commencing_date);
+    if (!parentEnd || !originalStart) return;
+
+    const start = new Date(parentEnd);
+    start.setUTCDate(start.getUTCDate() + 1);
+    const nextNumber = Number(parent.installment_number || 1) + 1;
+    const total = Number(parent.installment_total || 1);
+    const end = nextNumber >= total
+        ? addOneYear(new Date(originalStart))
+        : addCalendarMonth(new Date(start));
+    end.setUTCDate(end.getUTCDate() - 1);
+
+    document.getElementById('commencing_date').value = isoDate(start);
+    document.getElementById('expiry_date').value = isoDate(end);
+    data.commencing_date = isoDate(start);
+    data.expiry_date = isoDate(end);
+}
+
+function applyValidityRules() {
+    const commEl = document.getElementById('commencing_date');
+    const expEl = document.getElementById('expiry_date');
+    const hint = document.getElementById('validityHint');
+
+    expEl.readOnly = true;
+    if (!isInstallmentPlan()) {
+        commEl.readOnly = false;
+        hint.style.display = 'none';
+        if (commEl.value) setExpiry(commEl.value);
+        return;
+    }
+
+    hint.style.display = 'block';
+    if (data.business_type === 'extension') {
+        commEl.readOnly = true;
+        hint.innerText = 'Dates are set automatically from the prior installment policy through to its original anniversary.';
+    } else {
+        commEl.readOnly = false;
+        hint.innerText = 'The first installment certificate is one calendar month. Expiry is calculated automatically.';
+        if (commEl.value) setExpiry(commEl.value);
+    }
+}
+
 function setExpiry(start) {
     if (!start) return;
-    const d = new Date(start);
-    d.setFullYear(d.getFullYear() + 1);
-    d.setDate(d.getDate() - 1);
-    document.getElementById('expiry_date').value = d.toISOString().split('T')[0];
+    if (data.business_type === 'extension' && isInstallmentPlan()) return;
+    const d = dateFromIso(start);
+    if (!d) return;
+    if (isInstallmentPlan()) addCalendarMonth(d);
+    else addOneYear(d);
+    d.setUTCDate(d.getUTCDate() - 1);
+    document.getElementById('expiry_date').value = isoDate(d);
     data.commencing_date = start;
     data.expiry_date = document.getElementById('expiry_date').value;
 }
 
 document.getElementById('expiry_date').addEventListener('change', function() { data.expiry_date = this.value; });
+
+document.querySelectorAll('[data-value][id^="bt"]').forEach(card => {
+    card.addEventListener('click', () => {
+        document.querySelectorAll('[data-value][id^="bt"]').forEach(item => item.classList.remove('selected'));
+        card.classList.add('selected');
+        data.business_type = card.dataset.value;
+        data.parent_policy_no = null;
+        document.getElementById('extensionLookupRow').style.display =
+            data.business_type === 'extension' ? 'block' : 'none';
+        document.getElementById('extLookupMsg').innerText = '';
+        applyValidityRules();
+    });
+});
+
+async function refreshAvailablePeriods() {
+    const select = document.getElementById('type_of_certificate');
+    if (!data.company || !data.product) return;
+    try {
+        const params = new URLSearchParams({
+            company: data.company,
+            product: data.product,
+            cover: document.getElementById('type_of_cover').value || '',
+        });
+        const response = await fetch(`/api/insurers/periods?${params.toString()}`);
+        const result = await response.json();
+        if (!response.ok || !Array.isArray(result.periods)) return;
+        const allowed = new Set(result.periods);
+        select.querySelectorAll('option').forEach(option => {
+            if (!option.value) return;
+            option.hidden = !allowed.has(option.value);
+            option.disabled = !allowed.has(option.value);
+        });
+        if (select.value && !allowed.has(select.value)) select.value = '';
+        data.type_of_certificate = select.value;
+        applyValidityRules();
+    } catch (_) {
+        // Server-side validation remains authoritative if this convenience
+        // refresh is unavailable.
+    }
+}
+
+document.getElementById('type_of_certificate').addEventListener('change', function() {
+    data.type_of_certificate = this.value;
+    applyValidityRules();
+});
+
+document.getElementById('type_of_cover').addEventListener('change', refreshAvailablePeriods);
 
 document.querySelectorAll('.insurer-card').forEach(c => {
     c.onclick = () => {
@@ -696,6 +839,7 @@ function updateCoverOptions() {
 
     if (!info) {
         hint.innerText = '';
+        refreshAvailablePeriods();
         return;
     }
 
@@ -713,6 +857,90 @@ function updateCoverOptions() {
 
     const coverLabels = { comprehensive:'Comprehensive', third_party_only:'Third Party Only', third_party_fire_theft:'Third Party Fire & Theft' };
     hint.innerText = `Available cover for ${info.label}: ${[...allowed].map(c => coverLabels[c] || c).join(', ')}`;
+    refreshAvailablePeriods();
+}
+
+function selectInsurerForExtension(company) {
+    const card = [...document.querySelectorAll('.insurer-card')]
+        .find(item => item.dataset.value === company);
+    if (card) card.click();
+}
+
+function selectProductForExtension(product) {
+    const card = [...document.querySelectorAll('.product-card')]
+        .find(item => item.dataset.value === product);
+    if (card) card.click();
+}
+
+async function lookupExtension() {
+    const reg = document.getElementById('ext_vehicle_reg').value.trim().toUpperCase();
+    const msg = document.getElementById('extLookupMsg');
+    if (reg.length < 3) {
+        msg.style.color = '#b91c1c';
+        msg.innerText = 'Enter at least three characters of the registration number.';
+        return;
+    }
+
+    msg.style.color = '#64748b';
+    msg.innerText = 'Looking up the prior installment policy…';
+    try {
+        const response = await fetch(`/api/quotations/lookup-by-reg?vehicle_reg=${encodeURIComponent(reg)}`);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Lookup failed.');
+        if (!result.found) {
+            msg.style.color = '#b91c1c';
+            msg.innerText = 'No active installment policy with a remaining stage was found for this vehicle.';
+            return;
+        }
+
+        const q = result.data;
+        data.parent_policy_no = q.policy_no;
+        selectInsurerForExtension(q.company);
+        selectProductForExtension(q.product);
+        data.company = q.company || data.company;
+        data.product = q.product || data.product;
+        data.sub_type = q.sub_type || null;
+        document.getElementById('type_of_cover').value = q.type_of_cover || '';
+        document.getElementById('type_of_certificate').value = q.installment_plan || '';
+        data.type_of_cover = document.getElementById('type_of_cover').value;
+        data.type_of_certificate = document.getElementById('type_of_certificate').value;
+
+        const fields = {
+            policy_holder_name: q.policy_holder_name,
+            kra_pin: q.kra_pin,
+            phone: q.phone,
+            email: q.email,
+            id_number: q.id_number,
+            postal_address: q.postal_address,
+            vehicle_reg: q.vehicle_reg,
+            chassis_number: q.chassis_number,
+            engine_number: q.engine_number,
+            vehicle_body_type: q.vehicle_body_type,
+            vehicle_make: q.vehicle_make,
+            vehicle_model: q.vehicle_model,
+            passengers_licensed_to_carry: q.seats,
+            vehicle_value: q.vehicle_value,
+            tonnage: q.tonnage,
+            year_of_manufacture: q.year_of_manufacture,
+            year_of_registration: q.year_of_registration,
+        };
+        Object.entries(fields).forEach(([id, value]) => {
+            const field = document.getElementById(id);
+            if (field) field.value = value ?? '';
+        });
+
+        updateCoverOptions();
+        await refreshAvailablePeriods();
+        document.getElementById('type_of_certificate').value = q.installment_plan || '';
+        data.type_of_certificate = document.getElementById('type_of_certificate').value;
+        setExtensionValidity(q);
+        applyValidityRules();
+        msg.style.color = '#15803d';
+        msg.innerText = `Loaded policy ${q.policy_no} (installment ${q.installment_number}/${q.installment_total}).`;
+    } catch (error) {
+        msg.style.color = '#b91c1c';
+        msg.innerText = error.message || 'Lookup failed. Please try again.';
+    }
 }
 
 function updateFileLabel(inputId, labelId) {
@@ -735,6 +963,10 @@ function nextStep() {
         if (!data.type_of_certificate) return showError('Please select a certificate type.');
         if (!data.commencing_date)     return showError('Please enter the commencing date.');
         if (!data.expiry_date)         return showError('Please enter the expiry date.');
+        if (data.business_type === 'extension' && !data.parent_policy_no)
+            return showError('Fetch the prior installment policy before continuing with an extension.');
+        if (data.business_type === 'extension' && !isInstallmentPlan())
+            return showError('Extensions require the same 2- or 3-installment plan as the prior policy.');
 
         const catalog = INSURER_CATALOG[data.company] || {};
         const info = catalog[data.product];
@@ -799,7 +1031,7 @@ function goToReview() {
                            seats, vehicle_value:value, tonnage, pax,
                            year_of_manufacture: yom, year_of_registration: yor });
 
-    const CERT_LABELS = { annual:'Annual','30_days':'30 Days','14_days':'14 Days','7_days':'7 Days', inst_3:'3 Instalments',inst_6:'6 Instalments',inst_9:'9 Instalments',inst_10:'2 Instalments' };
+    const CERT_LABELS = { annual:'Annual','30_days':'30 Days','14_days':'14 Days','7_days':'7 Days', inst_2:'2 Instalments', inst_3:'3 Instalments' };
     const catalog  = INSURER_CATALOG[data.company] || {};
     const prodInfo = catalog[data.product];
     const productLabel = prodInfo ? prodInfo.label : fmtEnum(data.product);
@@ -808,6 +1040,7 @@ function goToReview() {
         <p><strong>Insurer:</strong> ${cap(data.company)}</p>
         <p><strong>Cover:</strong> ${fmtEnum(data.type_of_cover)}</p>
         <p><strong>Certificate:</strong> ${CERT_LABELS[data.type_of_certificate]||data.type_of_certificate}</p>
+        <p><strong>Business Type:</strong> ${data.business_type === 'extension' ? 'Extension' : 'New Business'}${data.parent_policy_no ? ` (${esc(data.parent_policy_no)})` : ''}</p>
         <p><strong>Product:</strong> ${esc(productLabel)}${data.sub_type ? ' — ' + fmtEnum(data.sub_type) : ''}</p>
         <p><strong>Timeline:</strong> ${data.commencing_date} → ${data.expiry_date}</p>
         <hr>
@@ -855,7 +1088,7 @@ async function generateQuote() {
 
         const PERIOD_LABELS = {
             '30_days':'30 Days','14_days':'14 Days','7_days':'7 Days',inst_2:'2 inst.',
-            annual:'Annual',inst_3:'3 Inst.',inst_6:'6 Inst.',inst_9:'9 Inst.',inst_10:'2 Inst.'
+            annual:'Annual',inst_3:'3 Inst.'
         };
 
         let breakdownHtml = '';

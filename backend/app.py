@@ -1392,6 +1392,71 @@ def _dmvic_fmt_date(d):
     return str(d)
 
 
+def _policy_date(value, field_name="date"):
+    """Parse a MongoDB/JSON policy date into a date object."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value[:10], "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValueError(f"Invalid {field_name}") from exc
+    raise ValueError(f"Invalid {field_name}")
+
+
+def _add_one_month(value):
+    """Return the same day in the next calendar month, clamped if needed."""
+    next_year = value.year + (value.month == 12)
+    next_month = 1 if value.month == 12 else value.month + 1
+    try:
+        return value.replace(year=next_year, month=next_month)
+    except ValueError:
+        following_year = next_year + (next_month == 12)
+        following_month = 1 if next_month == 12 else next_month + 1
+        return value.replace(year=following_year, month=following_month, day=1) - timedelta(days=1)
+
+
+def _one_year_anniversary(value):
+    try:
+        return value.replace(year=value.year + 1)
+    except ValueError:
+        # Leap-day commencement: use the final day of February next year.
+        return value.replace(year=value.year + 1, day=28)
+
+
+def compute_installment_period(original_commencing_date, installment_number,
+                               installment_total, parent_expiry_date=None):
+    """Compute an installment certificate period without trusting form dates.
+
+    The first certificate runs for one calendar month. Every non-final
+    extension is one calendar month; the final extension runs to the original
+    policy anniversary. This makes a three-installment plan a genuine
+    three-stage plan while retaining one annual coverage window.
+    """
+    original_start = _policy_date(original_commencing_date, "original commencing date")
+    installment_number = int(installment_number)
+    installment_total = int(installment_total)
+    if not 1 <= installment_number <= installment_total:
+        raise ValueError("Invalid installment sequence")
+
+    if installment_number == 1:
+        start = original_start
+    else:
+        if parent_expiry_date is None:
+            raise ValueError("Parent expiry date is required for an extension")
+        start = _policy_date(parent_expiry_date, "parent expiry date") + timedelta(days=1)
+
+    anniversary_end = _one_year_anniversary(original_start) - timedelta(days=1)
+    end = anniversary_end if installment_number == installment_total else _add_one_month(start) - timedelta(days=1)
+    if end > anniversary_end:
+        end = anniversary_end
+    if end < start:
+        raise ValueError("This installment plan has already reached its anniversary")
+    return start, end
+
+
 def dmvic_vehicle_identity(quote_row):
     """Return the vehicle identifiers that are safe to send to DMVIC.
 
@@ -2163,7 +2228,7 @@ PSV_RATE_TABLE = {
 }
 PSV_COL = {
     '30_days': 0, '14_days': 1, '7_days': 2,
-    'annual':  3, 'inst_3':  4, 'inst_6': 5, 'inst_9': 6,'inst_2': 7,
+    'annual':  3, 'inst_3':  4, 'inst_6': 5, 'inst_9': 6, 'inst_2': 7,
 }
 
 def get_psv_premium(seats, certificate):
@@ -2177,17 +2242,15 @@ def get_psv_premium(seats, certificate):
                 break
     row = PSV_RATE_TABLE[seats]
     col = PSV_COL.get(certificate, PSV_COL['annual'])
-    if certificate == 'inst_10':
-        base_amt = row[PSV_COL['inst_9']] * 1.02
-    elif certificate == 'inst_2':
+    if certificate == 'inst_2':
         base_amt = _period_base(row[PSV_COL['annual']], 'inst_2')
     else:
         base_amt = row[col]
 
     breakdown = {}
-    for cert, idx in PSV_COL.items():
+    for cert in ('annual', '30_days', '14_days', '7_days', 'inst_2', 'inst_3'):
+        idx = PSV_COL[cert]
         breakdown[cert] = row[idx]
-    breakdown['inst_10'] = round(row[PSV_COL['inst_9']] * 1.02)
     breakdown['inst_2']  = round(_period_base(row[PSV_COL['annual']], 'inst_2'))
 
     return round(base_amt), breakdown
@@ -2206,10 +2269,15 @@ PERIOD_FACTORS = {
 INSTALLMENT_COUNTS = {
     'inst_2':  2,
     'inst_3':  3,
-    'inst_6':  6,
-    'inst_9':  9,
-    'inst_10': 10,
 }
+
+INSTALLMENT_CAPS = {
+    'monarch': 2,
+    'definite': 2,
+    'directline': 3,
+}
+
+NO_INSTALLMENTS_PRODUCTS = {'motorcycle', 'motorcycle_psv'}
 
 NO_SHORT_TERM = {
     ('directline', 'private',        'third_party_only'),
@@ -2226,13 +2294,22 @@ def _period_base(annual_base, certificate):
     factor = PERIOD_FACTORS.get(certificate, 1.0)
     return annual_base * factor
 
+
+def allowed_installments(company, product):
+    if (product or '').lower() in NO_INSTALLMENTS_PRODUCTS:
+        return set()
+    cap = INSTALLMENT_CAPS.get((company or '').lower(), 2)
+    return {f'inst_{number}' for number in range(2, cap + 1)}
+
 def available_periods(company, product, cover):
-    all_periods = ['annual', '30_days', '14_days', '7_days',
-                    'inst_2', 'inst_3', 'inst_6', 'inst_9', 'inst_10']
+    base_periods = ['annual', '30_days', '14_days', '7_days']
     key = ((company or '').lower(), product, cover)
     if key in NO_SHORT_TERM:
-        return [p for p in all_periods if p not in ('30_days', '14_days', '7_days')]
-    return all_periods
+        base_periods = ['annual']
+    return base_periods + [
+        certificate for certificate in ('inst_2', 'inst_3')
+        if certificate in allowed_installments(company, product)
+    ]
 
 @app.route('/api/insurers/periods')
 @login_required
@@ -2241,6 +2318,48 @@ def api_available_periods():
     product = request.args.get('product', '')
     cover   = request.args.get('cover', '')
     return jsonify({"periods": available_periods(company, product, cover)})
+
+
+@app.route('/api/quotations/lookup-by-reg')
+@login_required
+@approved_required
+def lookup_quotation_by_reg():
+    """Return an agent-owned, extendable installment policy for auto-fill."""
+    vehicle_reg = (request.args.get('vehicle_reg') or '').strip().upper()
+    if len(vehicle_reg) < 3:
+        return jsonify({"error": "Enter at least 3 characters of the registration number."}), 400
+
+    parent = mongo_store.find_extendable_installment_policy(vehicle_reg)
+    if not parent:
+        return jsonify({"found": False})
+    if session['role'] != 'admin' and parent.get('agent_id') != session['user_id']:
+        # Do not leak another agent's client or policy information through a
+        # registration-number lookup.
+        return jsonify({"found": False})
+
+    quote = query("SELECT * FROM quotations WHERE id=%s", (parent.get('quote_id'),), fetchone=True)
+    if not quote:
+        return jsonify({"found": False})
+
+    def response_date(value):
+        try:
+            return _policy_date(value).isoformat()
+        except ValueError:
+            return None
+
+    response = dict(quote)
+    response.update({
+        'policy_no': parent.get('policy_no'),
+        'expiry_date': response_date(parent.get('expiry_date')),
+        'commencing_date': response_date(parent.get('commencing_date')),
+        'original_commencing_date': response_date(
+            parent.get('original_commencing_date') or parent.get('commencing_date')
+        ),
+        'installment_plan': parent.get('installment_plan'),
+        'installment_number': parent.get('installment_number') or 1,
+        'installment_total': parent.get('installment_total') or INSTALLMENT_COUNTS.get(parent.get('installment_plan'), 1),
+    })
+    return jsonify({"found": True, "data": response})
 
 DEFINITE_COMP_RATES = {
     'private': [(500_000, 1_000_000, 0.045), (1_000_001, 2_000_000, 0.035), (2_000_001, None, 0.030)],
@@ -2549,8 +2668,7 @@ def _build_breakdown(rate_fn, certificate, company='', product='', cover=''):
     annual_base = rate_fn(1.0)
     allowed = set(available_periods(company, product, cover))
     breakdown = {}
-    for period in ('annual', '30_days', '14_days', '7_days',
-                    'inst_2', 'inst_3', 'inst_6', 'inst_9', 'inst_10'):
+    for period in ('annual', '30_days', '14_days', '7_days', 'inst_2', 'inst_3'):
         if period not in allowed:
             continue
         base = _period_base(annual_base, period)
@@ -2595,6 +2713,8 @@ def calculate_premium(cover, product, value, certificate, seats=0, company='',
         levies, total = _add_levies(base_amt)
         breakdown = {}
         for period, raw_base in raw_breakdown.items():
+            if period not in available_periods(company, product, cover):
+                continue
             _, period_total = _add_levies(raw_base)
             breakdown[period] = period_total
         return {
@@ -2641,6 +2761,8 @@ def calculate_premium(cover, product, value, certificate, seats=0, company='',
                 levies, total = _add_levies(base_amt)
                 breakdown = {}
                 for period, raw_base in raw_breakdown.items():
+                    if period not in available_periods(company, product, cover):
+                        continue
                     _, period_total = _add_levies(raw_base)
                     breakdown[period] = period_total
                 return {
@@ -4077,6 +4199,78 @@ def generate_quotation():
     cover = d['type_of_cover']
     product = d['product']
     cert = d['type_of_certificate']
+    company = (d.get('company') or '').lower()
+    business_type = (d.get('business_type') or 'new').strip().lower()
+    parent_policy_no = (d.get('parent_policy_no') or '').strip().upper() or None
+
+    if business_type not in {'new', 'extension'}:
+        return jsonify({"error": "Business type must be New Business or Extension."}), 400
+    if cert in INSTALLMENT_COUNTS and cert not in allowed_installments(company, product):
+        return jsonify({"error": f"{cert.replace('_', ' ').title()} is not available for "
+                                  f"{(d.get('company') or '').title()} {product.replace('_', ' ')}."}), 400
+    if business_type == 'extension' and cert not in INSTALLMENT_COUNTS:
+        return jsonify({"error": "Extensions are available only for an installment policy."}), 400
+
+    installment_plan = None
+    installment_number = 1
+    installment_total = 1
+    original_commencing_date = d['commencing_date']
+
+    if cert in INSTALLMENT_COUNTS:
+        installment_plan = cert
+        installment_total = INSTALLMENT_COUNTS[cert]
+        parent_expiry_date = None
+
+        if business_type == 'extension':
+            if not parent_policy_no:
+                return jsonify({"error": "Select the prior installment policy before creating an extension."}), 400
+            parent = query("SELECT * FROM policies WHERE policy_no=%s", (parent_policy_no,), fetchone=True)
+            if not parent:
+                return jsonify({"error": "Original policy not found for this extension."}), 404
+            if session['role'] != 'admin' and parent.get('agent_id') != session['user_id']:
+                return jsonify({"error": "You do not have access to this policy."}), 403
+            if parent.get('status') != 'active':
+                return jsonify({"error": "The prior installment policy must have a confirmed payment before it can be extended."}), 409
+            if parent.get('installment_plan') != cert:
+                return jsonify({"error": "Choose the same installment plan as the prior policy."}), 400
+
+            try:
+                prior_number = int(parent.get('installment_number') or 1)
+                installment_total = int(parent.get('installment_total') or INSTALLMENT_COUNTS[cert])
+            except (TypeError, ValueError):
+                return jsonify({"error": "The prior installment policy has an invalid schedule."}), 409
+            installment_number = prior_number + 1
+            if installment_number > installment_total:
+                return jsonify({"error": "This installment plan is already complete."}), 409
+
+            parent_quote = query("SELECT * FROM quotations WHERE id=%s", (parent.get('quote_id'),), fetchone=True)
+            if not parent_quote:
+                return jsonify({"error": "The original quotation is unavailable for this extension."}), 409
+            identity_fields = ('company', 'product', 'type_of_cover', 'vehicle_reg', 'chassis_number')
+            mismatched = [field for field in identity_fields if str(d.get(field) or '').strip().upper()
+                          != str(parent_quote.get(field) or '').strip().upper()]
+            if mismatched:
+                return jsonify({"error": "Extension details must match the original policy: " +
+                                          ", ".join(field.replace('_', ' ') for field in mismatched)}), 400
+            original_commencing_date = parent.get('original_commencing_date') or parent.get('commencing_date')
+            parent_expiry_date = parent.get('expiry_date')
+        else:
+            parent_policy_no = None
+
+        try:
+            start, end = compute_installment_period(
+                original_commencing_date,
+                installment_number,
+                installment_total,
+                parent_expiry_date,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        d['commencing_date'] = start.isoformat()
+        d['expiry_date'] = end.isoformat()
+        original_commencing_date = _policy_date(original_commencing_date).isoformat()
+    else:
+        parent_policy_no = None
 
     if cover != 'third_party_only' and value <= 0 and product != 'psv':
         return jsonify({"error": "Vehicle value is required for this cover type"}), 400
@@ -4114,6 +4308,12 @@ def generate_quotation():
                 type_of_certificate,
                 product,
                 sub_type,
+                business_type,
+                parent_policy_no,
+                original_commencing_date,
+                installment_plan,
+                installment_number,
+                installment_total,
                 commencing_date,
                 expiry_date,
                 policy_holder_name,
@@ -4141,12 +4341,12 @@ def generate_quotation():
             )
             VALUES (
                 %s,%s,%s,%s,%s,
-                %s,%s,
+                %s,%s,%s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,
-                %s,%s,%s,%s
+                %s,%s,%s,%s,%s
             )
         """, (
             quote_id,
@@ -4156,6 +4356,12 @@ def generate_quotation():
             cert,
             product,
             d.get("sub_type") or None,
+            business_type,
+            parent_policy_no,
+            original_commencing_date,
+            installment_plan,
+            installment_number,
+            installment_total,
             d["commencing_date"],
             d["expiry_date"],
             d["policy_holder_name"],
@@ -4408,13 +4614,21 @@ def buy_cover():
         INSERT INTO policies
             (policy_no, quote_id, agent_id, client_id,
              vehicle_reg, type_of_cover, commencing_date, expiry_date,
-             total_payable, status, dmvic_status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending_payment','awaiting_payment')
+             total_payable, business_type, parent_policy_no,
+             original_commencing_date, installment_plan,
+             installment_number, installment_total, status, dmvic_status)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending_payment','awaiting_payment')
     """, (
         policy_no, quote_id, q['agent_id'], client_id,
         q.get('vehicle_reg',''), q['type_of_cover'],
         q['commencing_date'], q['expiry_date'],
         q['total_payable'],
+        q.get('business_type') or 'new',
+        q.get('parent_policy_no'),
+        q.get('original_commencing_date') or q.get('commencing_date'),
+        q.get('installment_plan'),
+        q.get('installment_number') or 1,
+        q.get('installment_total') or 1,
     ), commit=True)
 
     query("UPDATE quotations SET status='converted' WHERE id=%s",
@@ -4549,13 +4763,20 @@ def check_double_insurance():
         LIMIT 20
     """, (like, like))
 
+    candidate_start = _policy_date(commencing_date) if commencing_date else today
+    candidate_end = _policy_date(expiry_date) if expiry_date else candidate_start
     for r in rows:
-        active_today = (
-            r['status'] == 'active'
-            and r['days_remaining'] is not None
-            and r['days_remaining'] >= 0
+        try:
+            existing_start = _policy_date(r.get('commencing_date'))
+            existing_end = _policy_date(r.get('expiry_date'))
+        except ValueError:
+            existing_start = existing_end = None
+        overlaps_candidate = bool(
+            existing_start and existing_end
+            and existing_start <= candidate_end
+            and existing_end >= candidate_start
         )
-        r['is_double_insurance_risk'] = active_today
+        r['is_double_insurance_risk'] = r['status'] == 'active' and overlaps_candidate
 
     dmvic = {"checked": False, "matches": [], "error": None}
     token = dmvic_get_token() if (dmvic_reg or dmvic_chassis) else None

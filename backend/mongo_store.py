@@ -27,6 +27,8 @@ INT_FIELDS = {
     "underpayment_attempts",
     "seats",
     "pax",
+    "installment_number",
+    "installment_total",
 }
 
 FLOAT_FIELDS = {
@@ -42,6 +44,7 @@ FLOAT_FIELDS = {
 
 DATE_FIELDS = {
     "commencing_date",
+    "original_commencing_date",
     "expiry_date",
     "incident_date",
     "start_date",
@@ -185,9 +188,14 @@ class MongoStore:
         self.db.clients.create_index([("agent_id", ASCENDING), ("phone", ASCENDING)])
         self.db.quotations.create_index([("id", ASCENDING)], unique=True)
         self.db.quotations.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])
+        self.db.quotations.create_index([("parent_policy_no", ASCENDING)], sparse=True)
         self.db.policies.create_index([("policy_no", ASCENDING)], unique=True)
         self.db.policies.create_index([("agent_id", ASCENDING), ("created_at", DESCENDING)])
         self.db.policies.create_index([("status", ASCENDING), ("created_at", DESCENDING)])
+        self.db.policies.create_index([
+            ("vehicle_reg", ASCENDING), ("installment_plan", ASCENDING), ("created_at", DESCENDING),
+        ])
+        self.db.policies.create_index([("parent_policy_no", ASCENDING)], sparse=True)
         # MongoDB documents are schema-flexible, so the DMVIC issuance-request
         # field needs no ALTER TABLE equivalent. This sparse index is the
         # Mongo counterpart of the SQL migration and keeps the review queue fast.
@@ -239,11 +247,23 @@ class MongoStore:
             doc.setdefault("underpayment_attempts", 0)
         if table == "quotations":
             doc.setdefault("status", "pending")
+            doc.setdefault("business_type", "new")
+            doc.setdefault("parent_policy_no", None)
+            doc.setdefault("original_commencing_date", None)
+            doc.setdefault("installment_plan", None)
+            doc.setdefault("installment_number", 1)
+            doc.setdefault("installment_total", 1)
         if table == "policies":
             # New policies are not cover until payment has been verified.
             # MongoDB is schema-flexible, so this is the migration-equivalent
             # default for documents created without an explicit status.
             doc.setdefault("status", "pending_payment")
+            doc.setdefault("business_type", "new")
+            doc.setdefault("parent_policy_no", None)
+            doc.setdefault("original_commencing_date", doc.get("commencing_date"))
+            doc.setdefault("installment_plan", None)
+            doc.setdefault("installment_number", 1)
+            doc.setdefault("installment_total", 1)
         if table == "payments":
             doc.setdefault("status", "pending")
             doc.setdefault("method", "manual")
@@ -290,6 +310,31 @@ class MongoStore:
         if not sequence or "last_seq" not in sequence:
             raise RuntimeError(f"Monarch sequence is unavailable for {policy_class}")
         return int(sequence["last_seq"])
+
+    def find_extendable_installment_policy(self, vehicle_reg):
+        """Find the newest active installment policy with a remaining stage.
+
+        This is deliberately a Mongo-native lookup instead of sending a SQL
+        join through the compatibility layer. The application still performs
+        owner authorization before returning the document to the browser.
+        """
+        self._ensure_ready()
+        rows = self._find_many(
+            "policies",
+            {
+                "vehicle_reg": str(vehicle_reg or "").strip().upper(),
+                "status": "active",
+                "installment_plan": {"$in": ["inst_2", "inst_3"]},
+            },
+            sort=[("created_at", DESCENDING)],
+        )
+        for row in rows:
+            try:
+                if int(row.get("installment_number") or 1) < int(row.get("installment_total") or 1):
+                    return row
+            except (TypeError, ValueError):
+                continue
+        return None
 
     def _insert_doc(self, table, doc):
         doc = {k: _coerce_field(k, v) for k, v in doc.items()}
