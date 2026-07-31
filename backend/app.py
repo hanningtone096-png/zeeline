@@ -2883,68 +2883,121 @@ def calculate_premium(cover, product, value, certificate, seats=0, company='',
 # PDF QUOTATION GENERATOR
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF QUOTATION GENERATOR  (updated: logo top, terms excerpt, amount at bottom,
+# tightened spacing so everything fits on a single A4 page)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Path to your logo file — adjust to wherever it actually lives.
+# Based on your Flask static_folder config: static_folder='../css', static_url_path='/css'
+LOGO_PATH = os.path.join(BASE_DIR, '..', 'css', 'images', 'logo.png')
+
+# Keep this short — it's an EXCERPT, not the full T&Cs. Point clients to the
+# full document (e.g. on your website) for the rest.
+TERMS_EXCERPT = [
+    "This quotation is provided based on the information supplied by the client/agent "
+    "and is subject to underwriting acceptance by the insurer named above.",
+    "Cover only takes effect once the full premium has been received and a valid "
+    "certificate of insurance has been issued.",
+    "Any material change to the vehicle, its use, or the risk details declared may "
+    "invalidate this quotation and require re-rating.",
+    "This quotation does not constitute a contract of insurance and creates no "
+    "obligation on the insurer until a policy is formally issued.",
+]
+
+
 def generate_quote_pdf(data, quote_id, agent):
     if not PDF_AVAILABLE:
         return None
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
-                             rightMargin=2*cm, leftMargin=2*cm,
-                             topMargin=2*cm,   bottomMargin=2*cm)
+                             rightMargin=1.6*cm, leftMargin=1.6*cm,
+                             topMargin=1.2*cm,   bottomMargin=1.2*cm)
     styles = getSampleStyleSheet()
     blue   = colors.HexColor('#1d4ed8')
     gray   = colors.HexColor('#64748b')
     light  = colors.HexColor('#eff6ff')
+    green_bg = colors.HexColor('#ecfdf5')
+    green_border = colors.HexColor('#059669')
 
     title_style = ParagraphStyle('title', parent=styles['Normal'],
-                                  fontSize=18, textColor=blue,
-                                  spaceAfter=4, fontName='Helvetica-Bold')
+                                  fontSize=15, textColor=blue,
+                                  spaceAfter=2, fontName='Helvetica-Bold')
     sub_style   = ParagraphStyle('sub',   parent=styles['Normal'],
-                                  fontSize=10, textColor=gray)
+                                  fontSize=8.5, textColor=gray)
     head_style  = ParagraphStyle('head',  parent=styles['Normal'],
-                                  fontSize=11, textColor=blue,
-                                  spaceBefore=12, spaceAfter=4,
+                                  fontSize=10, textColor=blue,
+                                  spaceBefore=7, spaceAfter=3,
                                   fontName='Helvetica-Bold')
     body_style  = ParagraphStyle('body',  parent=styles['Normal'],
-                                  fontSize=10, leading=16)
+                                  fontSize=8.5, leading=12)
+    terms_style = ParagraphStyle('terms', parent=styles['Normal'],
+                                  fontSize=7.3, leading=10.5, textColor=colors.HexColor('#334155'))
 
     def section(title, rows):
         elems = [Paragraph(title, head_style), HRFlowable(width='100%', thickness=0.5, color=blue)]
         tdata = [[Paragraph(f"<b>{k}</b>", body_style),
-                  Paragraph(str(v), body_style)] for k,v in rows]
-        t = Table(tdata, colWidths=[6*cm, 10*cm])
+                  Paragraph(str(v), body_style)] for k, v in rows]
+        t = Table(tdata, colWidths=[6*cm, 10.4*cm])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,-1), colors.white),
             ('ROWBACKGROUNDS', (0,0), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
             ('TEXTCOLOR',  (0,0), (-1,-1), colors.HexColor('#1e293b')),
-            ('FONTSIZE',   (0,0), (-1,-1), 10),
-            ('TOPPADDING', (0,0), (-1,-1), 5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('FONTSIZE',   (0,0), (-1,-1), 8.5),
+            ('TOPPADDING', (0,0), (-1,-1), 3),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
             ('GRID', (0,0), (-1,-1), 0.25, colors.HexColor('#e2e8f0')),
         ]))
         elems.append(t)
         return elems
 
     story = []
-    story.append(Paragraph("WESTLAKE INSURANCE", title_style))
-    story.append(Paragraph("Insurance Quotation", sub_style))
-    story.append(Spacer(1, 0.3*cm))
+
+    # ── Logo + header row ────────────────────────────────────────────────
+    logo_added = False
+    if os.path.exists(LOGO_PATH):
+        try:
+            from reportlab.platypus import Image
+            logo_img = Image(LOGO_PATH, width=3.2*cm, height=1.6*cm)
+            logo_img.hAlign = 'LEFT'
+            header_tbl = Table(
+                [[logo_img,
+                  Paragraph("WESTLAKE INSURANCE<br/>"
+                            "<font size=8 color='#64748b'>Insurance Quotation</font>",
+                            title_style)]],
+                colWidths=[3.6*cm, 12.8*cm]
+            )
+            header_tbl.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 0),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+            ]))
+            story.append(header_tbl)
+            logo_added = True
+        except Exception as e:
+            log.warning("Could not embed logo in PDF: %s", type(e).__name__)
+
+    if not logo_added:
+        story.append(Paragraph("WESTLAKE INSURANCE", title_style))
+        story.append(Paragraph("Insurance Quotation", sub_style))
+
+    story.append(Spacer(1, 0.2*cm))
 
     summary = Table([[
         Paragraph(f"<b>Quotation No:</b> {quote_id}", body_style),
         Paragraph(f"<b>Date:</b> {date.today().strftime('%d %b %Y')}", body_style),
-        Paragraph(f"<b>Total Payable:</b> KES {data['total_payable']:,.0f}", body_style),
-    ]], colWidths=[6*cm, 5*cm, 5*cm])
+    ]], colWidths=[8*cm, 8.4*cm])
     summary.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), light),
         ('TEXTCOLOR',  (0,0), (-1,-1), blue),
-        ('FONTSIZE',   (0,0), (-1,-1), 10),
-        ('TOPPADDING', (0,0), (-1,-1), 8),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('FONTSIZE',   (0,0), (-1,-1), 8.5),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
         ('LEFTPADDING', (0,0), (-1,-1), 8),
         ('BOX', (0,0), (-1,-1), 0.5, blue),
     ]))
     story.append(summary)
-    story.append(Spacer(1, 0.4*cm))
+    story.append(Spacer(1, 0.2*cm))
 
     story += section("Insurance Details", [
         ("Insurance Company",  data.get('company','').title()),
@@ -2960,7 +3013,6 @@ def generate_quote_pdf(data, quote_id, agent):
         ("Phone",        data.get('phone','')),
         ("Email",        data.get('email','—')),
         ("ID Number",    data.get('id_number','—')),
-        ("Postal Address", data.get('postal_address','—')),
     ])
 
     story += section("Vehicle Details", [
@@ -2968,30 +3020,56 @@ def generate_quote_pdf(data, quote_id, agent):
         ("Make / Model",       data.get('make','')),
         ("Year of Manufacture", data.get('year_of_manufacture','—')),
         ("Chassis Number",     data.get('chassis_number','')),
-        ("Engine Number",      data.get('engine_number','—')),
         ("Body Type",          data.get('vehicle_body_type','')),
         ("Seats / Passengers", str(data.get('seats',''))),
         ("Vehicle Value",      f"KES {float(data.get('vehicle_value',0)):,.0f}" if data.get('vehicle_value') else '—'),
-        ("Tonnage",            f"{data.get('tonnage')} T" if data.get('tonnage') else '—'),
-    ])
-
-    story += section("Premium Breakdown", [
-        ("Base Premium",     f"KES {data['base_premium']:,.2f}"),
-        ("Levies & Taxes",   f"KES {data['levies_and_taxes']:,.2f}"),
-        ("Total Payable",    f"KES {data['total_payable']:,.2f}"),
     ])
 
     story += section("Prepared By", [
         ("Agent Name",  agent.get('name','')),
         ("Agent Email", agent.get('email','')),
-        ("Date",        date.today().strftime('%d %b %Y')),
     ])
 
-    story.append(Spacer(1, 0.5*cm))
+    # ── Terms & Conditions excerpt ──────────────────────────────────────
+    story.append(Paragraph("Terms &amp; Conditions (Excerpt)", head_style))
+    story.append(HRFlowable(width='100%', thickness=0.5, color=blue))
+    for clause in TERMS_EXCERPT:
+        story.append(Paragraph(f"&bull; {clause}", terms_style))
+    story.append(Paragraph(
+        f"The full Terms &amp; Conditions are available at {PUBLIC_SITE_URL}/terms.",
+        terms_style))
+
+    story.append(Spacer(1, 0.35*cm))
+
+    # ── Amount Payable — bottom, highlighted ────────────────────────────
+    amount_tbl = Table([
+        [Paragraph("<b>Base Premium</b>", body_style),
+         Paragraph(f"KES {data['base_premium']:,.2f}", body_style)],
+        [Paragraph("<b>Levies &amp; Taxes</b>", body_style),
+         Paragraph(f"KES {data['levies_and_taxes']:,.2f}", body_style)],
+        [Paragraph("<b>TOTAL AMOUNT PAYABLE</b>",
+                   ParagraphStyle('tot', parent=body_style, fontSize=11, textColor=green_border)),
+         Paragraph(f"<b>KES {data['total_payable']:,.2f}</b>",
+                   ParagraphStyle('tot2', parent=body_style, fontSize=13, textColor=green_border))],
+    ], colWidths=[9*cm, 7.4*cm])
+    amount_tbl.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,1), colors.white),
+        ('BACKGROUND', (0,2), (-1,2), green_bg),
+        ('BOX', (0,0), (-1,-1), 0.75, green_border),
+        ('LINEABOVE', (0,2), (-1,2), 0.75, green_border),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LEFTPADDING', (0,0), (-1,-1), 10),
+        ('ALIGN', (1,0), (1,-1), 'RIGHT'),
+        ('RIGHTPADDING', (0,0), (-1,-1), 10),
+    ]))
+    story.append(amount_tbl)
+
+    story.append(Spacer(1, 0.25*cm))
     story.append(Paragraph(
         "This quotation is valid for 30 days from the date of issue. "
         "Westlake Insurance reserves the right to amend or withdraw this quotation.",
-        ParagraphStyle('disc', parent=styles['Normal'], fontSize=8, textColor=gray)))
+        ParagraphStyle('disc', parent=styles['Normal'], fontSize=7, textColor=gray)))
 
     doc.build(story)
     return buf.getvalue()
