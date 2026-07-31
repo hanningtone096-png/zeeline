@@ -2880,10 +2880,6 @@ def calculate_premium(cover, product, value, certificate, seats=0, company='',
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PDF QUOTATION GENERATOR
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ─────────────────────────────────────────────────────────────────────────────
 # PDF QUOTATION GENERATOR  (updated: logo top, terms excerpt, amount at bottom,
 # tightened spacing so everything fits on a single A4 page)
 # ─────────────────────────────────────────────────────────────────────────────
