@@ -1,11 +1,13 @@
 import os, io, uuid, logging, smtplib, json, base64, time, threading, queue, hashlib, functools, random, ipaddress, re
 import requests
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import cm
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_RIGHT
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.lib.enums import TA_LEFT
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+)
 
 # ── Base Directory setup (resolves paths absolute to app.py) ──────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2908,217 +2910,180 @@ TERMS_EXCERPT = [
 ]
 
 
-def generate_quote_pdf(data, quote_id, agent):
-    if not PDF_AVAILABLE:
-        return None
-        
+ 
+# Short excerpt of your terms — trim/replace with the real clause(s) you want shown.
+TERMS_EXCERPT = (
+    "This quotation is valid for 30 days from the date of issue. Cover is subject to "
+    "the insurer's standard policy wording, exclusions, and the excess limits shown "
+    "above. Premiums are payable in full before cover incepts unless an installment "
+    "plan has been agreed in writing. Westlake Insurance Agency reserves the right to "
+    "amend or withdraw this quotation prior to acceptance."
+)
+ 
+COMPANY_NAME = "WESTLAKE INSURANCE AGENCY"
+COMPANY_ADDRESS_LINES = [
+    "P.O. Box 0000-00100, Nairobi",
+    "Tel: +254 700 000 000",
+    "Email: westlakeagencyltd@gmail.com",
+]
+LOGO_PATH = "images/westlake-logo.png"  # update to the actual logo file path
+ 
+ 
+def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        rightMargin=1.6*cm, leftMargin=1.6*cm,
-        topMargin=1.2*cm, bottomMargin=1.2*cm
+        rightMargin=1.4 * cm, leftMargin=1.4 * cm,
+        topMargin=1.2 * cm, bottomMargin=1.2 * cm,
     )
-    
-    styles = getSampleStyleSheet()
-    blue         = colors.HexColor('#1d4ed8')
-    gray         = colors.HexColor('#64748b')
-    light        = colors.HexColor('#eff6ff')
-    green_bg     = colors.HexColor('#ecfdf5')
-    green_border = colors.HexColor('#059669')
-
-    # Styles
-    title_style = ParagraphStyle(
-        'title', parent=styles['Normal'],
-        fontSize=15, leading=18, textColor=blue,
-        spaceAfter=2, fontName='Helvetica-Bold'
-    )
-    sub_style = ParagraphStyle(
-        'sub', parent=styles['Normal'],
-        fontSize=8.5, leading=11, textColor=gray
-    )
-    head_style = ParagraphStyle(
-        'head', parent=styles['Normal'],
-        fontSize=9.5, leading=12, textColor=blue,
-        spaceBefore=5, spaceAfter=2,
-        fontName='Helvetica-Bold'
-    )
-    body_style = ParagraphStyle(
-        'body', parent=styles['Normal'],
-        fontSize=8.5, leading=11
-    )
-    right_body_style = ParagraphStyle(
-        'right_body', parent=body_style,
-        alignment=TA_RIGHT
-    )
-    terms_style = ParagraphStyle(
-        'terms', parent=styles['Normal'],
-        fontSize=7, leading=9.5, textColor=colors.HexColor('#334155')
-    )
-    
-    # Amount Styles
-    tot_label_style = ParagraphStyle(
-        'tot_label', parent=body_style,
-        fontSize=10, leading=12, textColor=green_border, fontName='Helvetica-Bold'
-    )
-    tot_val_style = ParagraphStyle(
-        'tot_val', parent=body_style,
-        fontSize=11, leading=13, textColor=green_border, fontName='Helvetica-Bold', alignment=TA_RIGHT
-    )
-
-    def section(title, rows):
-        elems = [
-            Paragraph(title, head_style), 
-            HRFlowable(width='100%', thickness=0.5, color=blue, spaceBefore=1, spaceAfter=3)
-        ]
-        tdata = [[Paragraph(f"<b>{k}</b>", body_style),
-                  Paragraph(str(v), body_style)] for k, v in rows]
-        t = Table(tdata, colWidths=[5.5*cm, 10.9*cm])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), colors.white),
-            ('ROWBACKGROUNDS', (0,0), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
-            ('TEXTCOLOR',   (0,0), (-1,-1), colors.HexColor('#1e293b')),
-            ('TOPPADDING', (0,0), (-1,-1), 2),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ('LEFTPADDING', (0,0), (-1,-1), 4),
-            ('RIGHTPADDING', (0,0), (-1,-1), 4),
-            ('GRID', (0,0), (-1,-1), 0.25, colors.HexColor('#e2e8f0')),
-        ]))
-        elems.append(t)
-        return elems
-
+ 
+    navy = colors.HexColor('#1d4ed8')
+    dark = colors.HexColor('#1e293b')
+    border = colors.HexColor('#334155')
+ 
+    label_style = ParagraphStyle('label', fontSize=7.5, textColor=dark,
+                                  fontName='Helvetica-Bold', leading=9)
+    val_style = ParagraphStyle('val', fontSize=8, textColor=dark, leading=10)
+    small_style = ParagraphStyle('small', fontSize=7, textColor=dark, leading=9)
+    title_style = ParagraphStyle('title', fontSize=16, textColor=navy,
+                                  fontName='Helvetica-Bold', alignment=TA_LEFT)
+    company_style = ParagraphStyle('company', fontSize=13, textColor=navy,
+                                    fontName='Helvetica-Bold')
+    addr_style = ParagraphStyle('addr', fontSize=8, textColor=dark, leading=10)
+ 
     story = []
-
-    # ── Logo + Header Row ────────────────────────────────────────────────
-    logo_added = False
-    if 'LOGO_PATH' in globals() and LOGO_PATH and os.path.exists(LOGO_PATH):
-        try:
-            logo_img = Image(LOGO_PATH, width=3.2*cm, height=1.6*cm)
-            logo_img.hAlign = 'LEFT'
-            header_tbl = Table(
-                [[logo_img,
-                  Paragraph("WESTLAKE INSURANCE<br/>"
-                            "<font size=8 color='#64748b'>Insurance Quotation</font>",
-                            title_style)]],
-                colWidths=[3.6*cm, 12.8*cm]
-            )
-            header_tbl.setStyle(TableStyle([
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('TOPPADDING', (0,0), (-1,-1), 0),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 0),
-            ]))
-            story.append(header_tbl)
-            logo_added = True
-        except Exception as e:
-            if 'log' in globals():
-                log.warning("Could not embed logo in PDF: %s", type(e).__name__)
-
-    if not logo_added:
-        story.append(Paragraph("WESTLAKE INSURANCE", title_style))
-        story.append(Paragraph("Insurance Quotation", sub_style))
-
-    story.append(Spacer(1, 0.15*cm))
-
-    # Summary Box
-    summary = Table([[
-        Paragraph(f"<b>Quotation No:</b> {quote_id}", body_style),
-        Paragraph(f"<b>Date:</b> {date.today().strftime('%d %b %Y')}", right_body_style),
-    ]], colWidths=[8*cm, 8.4*cm])
-    summary.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), light),
-        ('TEXTCOLOR',   (0,0), (-1,-1), blue),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-        ('RIGHTPADDING', (0,0), (-1,-1), 6),
-        ('BOX', (0,0), (-1,-1), 0.5, blue),
-    ]))
-    story.append(summary)
-
-    # ── Sections ────────────────────────────────────────────────────────
-    story += section("Insurance Details", [
-        ("Insurance Company",  str(data.get('company', '')).title()),
-        ("Type of Cover",      str(data.get('type_of_cover', '')).replace('_', ' ').title()),
-        ("Certificate Type",   str(data.get('type_of_certificate', '')).replace('_', ' ').title()),
-        ("Commencing Date",    str(data.get('commencing_date', ''))),
-        ("Expiry Date",        str(data.get('expiry_date', ''))),
-    ])
-
-    story += section("Insured Details", [
-        ("Full Name",    str(data.get('policy_holder_name', ''))),
-        ("KRA PIN",      str(data.get('kra_pin', ''))),
-        ("Phone",        str(data.get('phone', ''))),
-        ("Email",        str(data.get('email', '—'))),
-        ("ID Number",    str(data.get('id_number', '—'))),
-    ])
-
-    # Safe Float Parsing for Vehicle Value
+ 
+    # ── Header: logo + company block ─────────────────────────────────────
+    header_cells = []
     try:
-        v_val = f"KES {float(data.get('vehicle_value', 0)):,.0f}" if data.get('vehicle_value') else '—'
-    except (ValueError, TypeError):
-        v_val = str(data.get('vehicle_value', '—'))
-
-    story += section("Vehicle Details", [
-        ("Registration No",    str(data.get('vehicle_reg', ''))),
-        ("Make / Model",       str(data.get('make', ''))),
-        ("Year of Manufacture", str(data.get('year_of_manufacture', '—'))),
-        ("Chassis Number",     str(data.get('chassis_number', ''))),
-        ("Body Type",          str(data.get('vehicle_body_type', ''))),
-        ("Seats / Passengers", str(data.get('seats', ''))),
-        ("Vehicle Value",      v_val),
-    ])
-
-    story += section("Prepared By", [
-        ("Agent Name",  str(agent.get('name', '')) if isinstance(agent, dict) else ''),
-        ("Agent Email", str(agent.get('email', '')) if isinstance(agent, dict) else ''),
-    ])
-
-    # ── Terms & Conditions Excerpt ──────────────────────────────────────
-    story.append(Paragraph("Terms &amp; Conditions (Excerpt)", head_style))
-    story.append(HRFlowable(width='100%', thickness=0.5, color=blue, spaceBefore=1, spaceAfter=2))
-    
-    terms_list = globals().get('TERMS_EXCERPT', [])
-    for clause in terms_list:
-        story.append(Paragraph(f"&bull; {clause}", terms_style))
-    
-    public_url = globals().get('PUBLIC_SITE_URL', 'https://example.com')
-    story.append(Paragraph(
-        f"The full Terms &amp; Conditions are available at {public_url}/terms.",
-        terms_style))
-
-    story.append(Spacer(1, 0.2*cm))
-
-    # ── Amount Payable Table ───────────────────────────────────────────
-    base_prem = float(data.get('base_premium', 0))
-    levies    = float(data.get('levies_and_taxes', 0))
-    total_pay = float(data.get('total_payable', 0))
-
-    amount_tbl = Table([
-        [Paragraph("<b>Base Premium</b>", body_style),
-         Paragraph(f"KES {base_prem:,.2f}", right_body_style)],
-        [Paragraph("<b>Levies &amp; Taxes</b>", body_style),
-         Paragraph(f"KES {levies:,.2f}", right_body_style)],
-        [Paragraph("<b>TOTAL AMOUNT PAYABLE</b>", tot_label_style),
-         Paragraph(f"KES {total_pay:,.2f}", tot_val_style)],
-    ], colWidths=[9*cm, 7.4*cm])
-    
-    amount_tbl.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,1), colors.white),
-        ('BACKGROUND', (0,2), (-1,2), green_bg),
-        ('BOX', (0,0), (-1,-1), 0.75, green_border),
-        ('LINEABOVE', (0,2), (-1,2), 0.75, green_border),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-        ('LEFTPADDING', (0,0), (-1,-1), 8),
-        ('RIGHTPADDING', (0,0), (-1,-1), 8),
+        logo = Image(logo_path, width=2.6 * cm, height=2.6 * cm)
+    except Exception:
+        logo = Paragraph("", small_style)
+    company_block = [Paragraph(COMPANY_NAME, company_style)]
+    for line in COMPANY_ADDRESS_LINES:
+        company_block.append(Paragraph(line, addr_style))
+    header_table = Table([[logo, company_block]], colWidths=[3 * cm, 14 * cm])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
     ]))
-    story.append(amount_tbl)
-
-    story.append(Spacer(1, 0.15*cm))
-    story.append(Paragraph(
-        "This quotation is valid for 30 days from the date of issue. "
-        "Westlake Insurance reserves the right to amend or withdraw this quotation.",
-        ParagraphStyle('disc', parent=styles['Normal'], fontSize=6.5, leading=8.5, textColor=gray)))
-
+    story.append(header_table)
+    story.append(Spacer(1, 0.15 * cm))
+    story.append(Paragraph("INSURANCE QUOTATION", title_style))
+    story.append(Spacer(1, 0.25 * cm))
+ 
+    def row(label, value):
+        return [Paragraph(label, label_style), Paragraph(str(value), val_style)]
+ 
+    box_style = TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.75, border),
+        ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#cbd5e1')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('SPAN', (1, 0), (-1, 0)),
+    ])
+    label_col = 3.2 * cm
+    val_col = 14.8 * cm
+ 
+    # ── Account / Insured block ──────────────────────────────────────────
+    acct_rows = [
+        [Paragraph("QUOTATION NO.", label_style), Paragraph(
+            f"{quote_id}&nbsp;&nbsp;&nbsp;&nbsp;DATE: {date.today().strftime('%d/%m/%Y')}", val_style)],
+        row("INSURED", data.get('policy_holder_name', '')),
+        row("KRA PIN / ID", f"{data.get('kra_pin', '')}  /  {data.get('id_number', '—')}"),
+        row("PHONE / EMAIL", f"{data.get('phone', '')}  /  {data.get('email', '—')}"),
+    ]
+    t = Table(acct_rows, colWidths=[label_col, val_col])
+    t.setStyle(box_style)
+    story.append(t)
+ 
+    # ── Risk covered ─────────────────────────────────────────────────────
+    risk_rows = [
+        row("INSURER", data.get('company', '').title()),
+        row("RISK COVERED", f"{data.get('type_of_cover', '').replace('_', ' ').title()} — "
+                             f"{data.get('type_of_certificate', '').replace('_', ' ').title()}"),
+        row("PERIOD", f"{data.get('commencing_date', '')}  to  {data.get('expiry_date', '')}"),
+    ]
+    t2 = Table(risk_rows, colWidths=[label_col, val_col])
+    t2.setStyle(box_style)
+    story.append(t2)
+ 
+    # ── Vehicle ──────────────────────────────────────────────────────────
+    veh_header = ['REG NO.', 'MAKE / MODEL', 'CHASSIS NO.', 'YEAR', 'SEATS', 'VALUE (KES)']
+    veh_row = [
+        data.get('vehicle_reg', ''),
+        data.get('make', ''),
+        data.get('chassis_number', ''),
+        str(data.get('year_of_manufacture', '—')),
+        str(data.get('seats', '')),
+        f"{float(data.get('vehicle_value', 0) or 0):,.0f}" if data.get('vehicle_value') else '—',
+    ]
+    vt = Table([veh_header, veh_row], colWidths=[2.6*cm, 4.2*cm, 3.4*cm, 1.8*cm, 1.8*cm, 4*cm])
+    vt.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.75, border),
+        ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eff6ff')),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(vt)
+    story.append(Spacer(1, 0.15 * cm))
+ 
+    # ── Terms excerpt ────────────────────────────────────────────────────
+    terms_table = Table(
+        [[Paragraph("TERMS", label_style), Paragraph(TERMS_EXCERPT, small_style)]],
+        colWidths=[label_col, val_col],
+    )
+    terms_table.setStyle(box_style)
+    story.append(terms_table)
+    story.append(Spacer(1, 0.2 * cm))
+ 
+    # ── Premium computation — kept for last, amount at the very bottom ──
+    prem_rows = [
+        [Paragraph("PREMIUM<br/>COMPUTATION", label_style), Paragraph(
+            f"Base Premium&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            f"KES {data['base_premium']:,.2f}<br/>"
+            f"Levies &amp; Taxes&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            f"KES {data['levies_and_taxes']:,.2f}",
+            val_style)],
+    ]
+    pt = Table(prem_rows, colWidths=[label_col, val_col])
+    pt.setStyle(box_style)
+    story.append(pt)
+ 
+    total_style = ParagraphStyle('total', fontSize=12, textColor=navy,
+                                  fontName='Helvetica-Bold')
+    total_table = Table(
+        [[Paragraph("TOTAL PAYABLE", label_style),
+          Paragraph(f"KES {data['total_payable']:,.2f}", total_style)]],
+        colWidths=[label_col, val_col],
+    )
+    total_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.75, border),
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#eff6ff')),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(total_table)
+    story.append(Spacer(1, 0.5 * cm))
+ 
+    # ── Signature line ───────────────────────────────────────────────────
+    sig_style = ParagraphStyle('sig', fontSize=8, textColor=dark)
+    sig_table = Table([[
+        Paragraph(f"PREPARED BY:<br/>{agent.get('name', '')}", sig_style),
+        Paragraph("Head Office", sig_style),
+        Paragraph("AUTHORISED BY:", sig_style),
+    ]], colWidths=[6 * cm, 6 * cm, 6 * cm])
+    story.append(sig_table)
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(Paragraph(f"Date Printed: {date.today().strftime('%d/%m/%Y')}", small_style))
+ 
     doc.build(story)
     return buf.getvalue()
 
