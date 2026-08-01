@@ -2885,32 +2885,23 @@ def calculate_premium(cover, product, value, certificate, seats=0, company='',
         'period_breakdown': breakdown,
         'psv_table':        False,
     }
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# PDF QUOTATION GENERATOR  (updated: logo top, terms excerpt, amount at bottom,
+# PDF QUOTATION GENERATOR  (logo top, terms excerpt, amount at bottom,
 # tightened spacing so everything fits on a single A4 page)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Path to your logo file — adjust to wherever it actually lives.
-# Based on your Flask static_folder config: static_folder='../css', static_url_path='/css'
+# Your Flask app is configured with static_folder='../css', static_url_path='/css',
+# meaning the actual images directory on disk is <BASE_DIR>/../css/images/.
+# Point the logo there so it resolves the same way favicon.ico already does above.
 LOGO_PATH = os.path.join(BASE_DIR, '..', 'css', 'images', 'logo.png')
 
-# Keep this short — it's an EXCERPT, not the full T&Cs. Point clients to the
-# full document (e.g. on your website) for the rest.
-TERMS_EXCERPT = [
-    "This quotation is provided based on the information supplied by the client/agent "
-    "and is subject to underwriting acceptance by the insurer named above.",
-    "Cover only takes effect once the full premium has been received and a valid "
-    "certificate of insurance has been issued.",
-    "Any material change to the vehicle, its use, or the risk details declared may "
-    "invalidate this quotation and require re-rating.",
-    "This quotation does not constitute a contract of insurance and creates no "
-    "obligation on the insurer until a policy is formally issued.",
+COMPANY_NAME = "WESTLAKE INSURANCE AGENCY"
+COMPANY_ADDRESS_LINES = [
+    "P.O. Box 0000-00100, Nairobi",
+    "Tel: +254 700 000 000",
+    "Email: westlakeagencyltd@gmail.com",
 ]
 
-
- 
 # Short excerpt of your terms — trim/replace with the real clause(s) you want shown.
 TERMS_EXCERPT = (
     "This quotation is valid for 30 days from the date of issue. Cover is subject to "
@@ -2919,28 +2910,23 @@ TERMS_EXCERPT = (
     "plan has been agreed in writing. Westlake Insurance Agency reserves the right to "
     "amend or withdraw this quotation prior to acceptance."
 )
- 
-COMPANY_NAME = "WESTLAKE INSURANCE AGENCY"
-COMPANY_ADDRESS_LINES = [
-    "P.O. Box 0000-00100, Nairobi",
-    "Tel: +254 700 000 000",
-    "Email: westlakeagencyltd@gmail.com",
-]
-LOGO_PATH = "images/westlake-logo.png"  # update to the actual logo file path
- 
- 
+
+
 def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
+    if not PDF_AVAILABLE:
+        return None
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         rightMargin=1.4 * cm, leftMargin=1.4 * cm,
         topMargin=1.2 * cm, bottomMargin=1.2 * cm,
     )
- 
+
     navy = colors.HexColor('#1d4ed8')
     dark = colors.HexColor('#1e293b')
     border = colors.HexColor('#334155')
- 
+
     label_style = ParagraphStyle('label', fontSize=7.5, textColor=dark,
                                   fontName='Helvetica-Bold', leading=9)
     val_style = ParagraphStyle('val', fontSize=8, textColor=dark, leading=10)
@@ -2950,11 +2936,10 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     company_style = ParagraphStyle('company', fontSize=13, textColor=navy,
                                     fontName='Helvetica-Bold')
     addr_style = ParagraphStyle('addr', fontSize=8, textColor=dark, leading=10)
- 
+
     story = []
- 
+
     # ── Header: logo + company block ─────────────────────────────────────
-    header_cells = []
     try:
         logo = Image(logo_path, width=2.6 * cm, height=2.6 * cm)
     except Exception:
@@ -2971,10 +2956,10 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     story.append(Spacer(1, 0.15 * cm))
     story.append(Paragraph("INSURANCE QUOTATION", title_style))
     story.append(Spacer(1, 0.25 * cm))
- 
+
     def row(label, value):
         return [Paragraph(label, label_style), Paragraph(str(value), val_style)]
- 
+
     box_style = TableStyle([
         ('BOX', (0, 0), (-1, -1), 0.75, border),
         ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#cbd5e1')),
@@ -2987,7 +2972,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     ])
     label_col = 3.2 * cm
     val_col = 14.8 * cm
- 
+
     # ── Account / Insured block ──────────────────────────────────────────
     acct_rows = [
         [Paragraph("QUOTATION NO.", label_style), Paragraph(
@@ -2999,7 +2984,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     t = Table(acct_rows, colWidths=[label_col, val_col])
     t.setStyle(box_style)
     story.append(t)
- 
+
     # ── Risk covered ─────────────────────────────────────────────────────
     risk_rows = [
         row("INSURER", data.get('company', '').title()),
@@ -3010,7 +2995,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     t2 = Table(risk_rows, colWidths=[label_col, val_col])
     t2.setStyle(box_style)
     story.append(t2)
- 
+
     # ── Vehicle ──────────────────────────────────────────────────────────
     veh_header = ['REG NO.', 'MAKE / MODEL', 'CHASSIS NO.', 'YEAR', 'SEATS', 'VALUE (KES)']
     veh_row = [
@@ -3033,7 +3018,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     ]))
     story.append(vt)
     story.append(Spacer(1, 0.15 * cm))
- 
+
     # ── Terms excerpt ────────────────────────────────────────────────────
     terms_table = Table(
         [[Paragraph("TERMS", label_style), Paragraph(TERMS_EXCERPT, small_style)]],
@@ -3042,7 +3027,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     terms_table.setStyle(box_style)
     story.append(terms_table)
     story.append(Spacer(1, 0.2 * cm))
- 
+
     # ── Premium computation — kept for last, amount at the very bottom ──
     prem_rows = [
         [Paragraph("PREMIUM<br/>COMPUTATION", label_style), Paragraph(
@@ -3055,7 +3040,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     pt = Table(prem_rows, colWidths=[label_col, val_col])
     pt.setStyle(box_style)
     story.append(pt)
- 
+
     total_style = ParagraphStyle('total', fontSize=12, textColor=navy,
                                   fontName='Helvetica-Bold')
     total_table = Table(
@@ -3072,7 +3057,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     ]))
     story.append(total_table)
     story.append(Spacer(1, 0.5 * cm))
- 
+
     # ── Signature line ───────────────────────────────────────────────────
     sig_style = ParagraphStyle('sig', fontSize=8, textColor=dark)
     sig_table = Table([[
@@ -3083,7 +3068,7 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     story.append(sig_table)
     story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph(f"Date Printed: {date.today().strftime('%d/%m/%Y')}", small_style))
- 
+
     doc.build(story)
     return buf.getvalue()
 
