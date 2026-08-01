@@ -2893,7 +2893,7 @@ def calculate_premium(cover, product, value, certificate, seats=0, company='',
 # Your Flask app is configured with static_folder='../css', static_url_path='/css',
 # meaning the actual images directory on disk is <BASE_DIR>/../css/images/.
 # Point the logo there so it resolves the same way favicon.ico already does above.
-LOGO_PATH = os.path.join(BASE_DIR, '..', 'css', 'images', 'logo.png')
+LOGO_PATH = os.path.join(BASE_DIR, '..', 'css', 'images', 'zeeline_logo.jpg')
 
 COMPANY_NAME = "WESTLAKE INSURANCE AGENCY"
 COMPANY_ADDRESS_LINES = [
@@ -2940,9 +2940,12 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     story = []
 
     # ── Header: logo + company block ─────────────────────────────────────
-    try:
-        logo = Image(logo_path, width=2.6 * cm, height=2.6 * cm)
-    except Exception:
+    if logo_path and os.path.exists(logo_path):
+        try:
+            logo = Image(logo_path, width=2.6 * cm, height=2.6 * cm)
+        except Exception:
+            logo = Paragraph("", small_style)
+    else:
         logo = Paragraph("", small_style)
     company_block = [Paragraph(COMPANY_NAME, company_style)]
     for line in COMPANY_ADDRESS_LINES:
@@ -4556,9 +4559,9 @@ def download_quotation_pdf(quote_id):
             quote_id,
             {"name": agent.get('full_name', ''), "email": agent.get('email', '')},
         )
-    except Exception as e:
+    except Exception:
         log.exception("Quotation PDF generation failed for %s", quote_id)
-        return jsonify({"error": f"Could not generate this quotation PDF: {type(e).__name__}: {e}"}), 500
+        return jsonify({"error": "Could not generate this quotation PDF."}), 500
     if not pdf_bytes:
         return jsonify({"error": "Quotation PDF generation is unavailable."}), 503
 
