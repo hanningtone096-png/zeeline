@@ -4556,10 +4556,9 @@ def download_quotation_pdf(quote_id):
             quote_id,
             {"name": agent.get('full_name', ''), "email": agent.get('email', '')},
         )
-    except Exception:
+    except Exception as e:
         log.exception("Quotation PDF generation failed for %s", quote_id)
-        return jsonify({"error": "Could not generate this quotation PDF."}), 500
-
+        return jsonify({"error": f"Could not generate this quotation PDF: {type(e).__name__}: {e}"}), 500
     if not pdf_bytes:
         return jsonify({"error": "Quotation PDF generation is unavailable."}), 503
 
