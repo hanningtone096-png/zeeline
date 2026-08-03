@@ -1,5 +1,6 @@
 import os, io, uuid, logging, smtplib, json, base64, time, threading, queue, hashlib, functools, random, ipaddress, re
 import requests
+from ai_assistant import assistant_bp
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
@@ -164,7 +165,7 @@ CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 # WITHOUT this block, every page render raises
 # jinja2.exceptions.UndefinedError: 'csrf_token' is undefined.
 csrf = CSRFProtect(app)
-
+app.register_blueprint(assistant_bp)
 
 @app.errorhandler(CSRFError)
 def handle_csrf_error(error):
