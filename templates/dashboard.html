@@ -387,15 +387,16 @@ async function loadAgents() {
                             <button class="action-menu-item item-reject" onclick="setAgentStatus(${a.id},'rejected')">
                                 <i class="fas fa-times"></i> Reject
                             </button>
-                            <button class="action-menu-item item-suspend" onclick="setAgentStatus(${a.id},'suspended')">
+                           <button class="action-menu-item item-suspend" onclick="suspendUser(${a.id}, '${escAttr(a.full_name)}')">
                                 <i class="fas fa-pause"></i> Suspend
                             </button>
                             ${a.flagged ? `
                             <button class="action-menu-item item-suspend" onclick="unflagAgent(${a.id})">
                                 <i class="fas fa-flag"></i> Clear Flag
                             </button>` : ''}
-                            <button class="action-menu-item item-suspend" onclick="suspendUser(${a.id}, '${escAttr(a.full_name)}')">
-                                <i class="fas fa-ban"></i> Suspend
+                            <div style="border-top:1px solid #e2e8f0;margin:4px 0;"></div>
+                            <button class="action-menu-item item-delete" onclick="deleteAgent(${a.id}, '${escAttr(a.full_name)}')" style="color:#dc2626;">
+                                <i class="fas fa-trash"></i> Delete
                             </button>
                         </div>
                     </div>
@@ -477,6 +478,35 @@ async function unflagAgent(id) {
         }
     } catch (err) {
         console.error('Error clearing flag:', err);
+        alert('Server communication error. Please try again.');
+    }
+}
+async function deleteAgent(id, fullName) {
+    const typed = prompt(
+        `This will PERMANENTLY delete agent "${fullName}" and ALL of their clients, quotations, policies, and claims. This cannot be undone.\n\nType the agent's name exactly to confirm:\n${fullName}`
+    );
+    if (typed === null) return;
+    if (typed.trim() !== fullName.trim()) {
+        alert('Name did not match. Delete cancelled.');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/admin/users/${id}`, {
+            method: 'DELETE',
+            headers: withCsrf({ 'Content-Type': 'application/json' })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            alert(data.error || 'Failed to delete agent.');
+            return;
+        }
+
+        alert('Agent and all associated records have been permanently deleted.');
+        loadAgents();
+    } catch (err) {
+        console.error('Error deleting agent:', err);
         alert('Server communication error. Please try again.');
     }
 }
