@@ -2432,7 +2432,7 @@ DEFINITE_TP_FLAT = {
     'special_types':          5_000,
     'motorcycle':             2_000,
     'tuktuk_commercial':      4_000,
-    'tuktuk_psv':            21_500,
+    'tuktuk_psv':             4_500,
     'ambulance_fire':         7_500,
     'electric_motorbike':     5_000,
 }
@@ -2581,18 +2581,52 @@ def get_monarch_tonnage_tp(tonnage):
         if hi is not None and lo <= t <= hi:   return amt
     return 15_000
 
-def get_monarch_tp_flat(product, seats=0):
+def get_monarch_tp_flat(product, seats=0, sub_type=None):
     seats = int(seats or 0)
     if product in ('institutional', 'driving_school'):
         return 5_000 if seats <= 14 else 7_500
     if product == 'agriculture_forestry':
-        return 3_000
+        return 3_000 if sub_type == 'tractor' else 7_500
     return MONARCH_TP_FLAT.get(product)
 
 
 DIRECTLINE_COMP_TIERS = {
     'private': [(0, 1_500_000, 0.0400), (1_500_001, 3_000_000, 0.0375),
                 (3_000_001, 5_000_000, 0.0350), (5_000_001, None, 0.0300)],
+}
+
+# Flat Comprehensive rates for non-private Directline products (2026 sheet).
+DIRECTLINE_COMP_FLAT = {
+    'commercial_own_goods': 0.04,
+    'general_cartage':      0.04,
+    'tanker':               0.09,
+    'institutional':        0.035,
+    'psv_yellow_taxi':      0.055,
+    'tuktuk_psv':           0.04,
+    'psv_chauffeur_app':    0.055,
+    'chauffeur_van_tour':   0.055,
+    'psv':                  0.04,
+    'psv_bus':              0.045,
+    'asset_only_matatu':    0.04,
+    'asset_only_bus':       0.045,
+    'agriculture_forestry': 0.03,
+    'driving_school':       0.05,
+}
+DIRECTLINE_COMP_FLAT_MINIMUMS = {
+    'commercial_own_goods': 40_000,
+    'general_cartage':      45_000,
+    'tanker':               100_000,
+    'institutional':        35_000,
+    'psv_yellow_taxi':      40_000,
+    'tuktuk_psv':           20_000,
+    'psv_chauffeur_app':    40_000,
+    'chauffeur_van_tour':   37_500,
+    'psv':                  30_000,
+    'psv_bus':              30_000,
+    'asset_only_matatu':    40_000,
+    'asset_only_bus':       50_000,
+    'agriculture_forestry': 25_000,
+    'driving_school':       40_000,
 }
 
 DIRECTLINE_MINIMUMS = {
@@ -2617,14 +2651,14 @@ DIRECTLINE_TP_FLAT = {
     'motorcycle':      3_194,
     'motorcycle_psv':  3_651,
 }
-
 def get_directline_comp_rate(product, value):
-    tiers = DIRECTLINE_COMP_TIERS.get(product, DIRECTLINE_COMP_TIERS['private'])
-    for lo, hi, rate in tiers:
-        if hi is None and value >= lo:           return rate
-        if hi is not None and lo <= value <= hi: return rate
-    return tiers[0][2]
-
+    if product in DIRECTLINE_COMP_TIERS:
+        tiers = DIRECTLINE_COMP_TIERS[product]
+        for lo, hi, rate in tiers:
+            if hi is None and value >= lo:           return rate
+            if hi is not None and lo <= value <= hi: return rate
+        return tiers[0][2]
+    return DIRECTLINE_COMP_FLAT.get(product, DIRECTLINE_COMP_TIERS['private'][0][2])
 def get_directline_tonnage_tp(tonnage):
     t = float(tonnage or 0)
     for lo, hi, amt in DIRECTLINE_TONNAGE_TP:
