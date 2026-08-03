@@ -1,0 +1,194 @@
+<!-- ═══════════════ Westlake AI Assistant — self-contained widget ═══════════════
+     Include with: {% include '_ai_assistant.html' %}
+     Needs nothing from the parent page except a <meta name="csrf-token"> tag,
+     which every Westlake page already has. All CSS/JS here is namespaced
+     with "wlAi" / "ai-" prefixes so it can't collide with page-specific code. -->
+
+<style>
+#wlAiBubble {
+    position: fixed; bottom: 22px; right: 22px;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: #2563eb; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(37,99,235,.4);
+    z-index: 9999; border: none;
+}
+#wlAiPanel {
+    display: none; flex-direction: column;
+    position: fixed; bottom: 90px; right: 22px;
+    width: 340px; max-width: 92vw; height: 460px;
+    background: #fff; border-radius: 14px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.25);
+    z-index: 9999; overflow: hidden;
+    font-family: inherit;
+}
+.wl-ai-header {
+    background: #1d4ed8; color: #fff; padding: 12px 16px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-weight: 600; font-size: 14px;
+}
+.wl-ai-header button { background: none; border: none; color: #fff; cursor: pointer; font-size: 15px; }
+.wl-ai-messages { flex: 1; overflow-y: auto; padding: 12px; }
+.wl-ai-msg { padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; max-width: 85%; line-height: 1.4; }
+.wl-ai-msg-bot { background: #f1f5f9; color: #1e293b; }
+.wl-ai-msg-user { background: #2563eb; color: #fff; margin-left: auto; }
+.wl-ai-input-row { display: flex; gap: 6px; padding: 10px; border-top: 1px solid #e2e8f0; align-items: center; }
+.wl-ai-input-row input[type=text] { flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.wl-ai-attach { cursor: pointer; color: #64748b; padding: 6px; font-size: 16px; }
+.wl-ai-input-row button.wl-ai-send { background: #2563eb; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+#wlAiFileLabel { font-size: 11px; color: #64748b; padding: 4px 12px; }
+.wl-ai-extracted { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 12px; margin: 0 12px 8px; font-size: 12px; }
+.wl-ai-extracted button { margin-top: 8px; background: #16a34a; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+@media (max-width: 480px) {
+    #wlAiPanel { right: 10px; bottom: 80px; width: calc(100vw - 20px); }
+}
+</style>
+
+<button id="wlAiBubble" onclick="wlAiToggle()" aria-label="Open Westlake Assistant" title="Ask Westlake Assistant">
+    <i class="fas fa-robot"></i>
+</button>
+
+<div id="wlAiPanel">
+    <div class="wl-ai-header">
+        <span><i class="fas fa-robot"></i> Westlake Assistant</span>
+        <button onclick="wlAiToggle()" aria-label="Close">✕</button>
+    </div>
+    <div id="wlAiMessages" class="wl-ai-messages">
+        <div class="wl-ai-msg wl-ai-msg-bot">Hi! Ask me anything about using Westlake, or attach a logbook photo and I'll read the vehicle details for you.</div>
+    </div>
+    <div id="wlAiExtractedBox" style="display:none;"></div>
+    <div id="wlAiFileLabel" style="display:none;"></div>
+    <div class="wl-ai-input-row">
+        <label class="wl-ai-attach" title="Attach logbook photo">
+            <i class="fas fa-camera"></i>
+            <input type="file" id="wlAiImageInput" accept="image/png,image/jpeg" style="display:none;" onchange="wlAiFileSelected()">
+        </label>
+        <input type="text" id="wlAiTextInput" placeholder="Type a message…" onkeydown="if(event.key==='Enter') wlAiSend();">
+        <button class="wl-ai-send" onclick="wlAiSend()" aria-label="Send"><i class="fas fa-paper-plane"></i></button>
+    </div>
+</div>
+
+<script>
+(function () {
+    // IIFE so nothing here leaks into the page's global scope except the
+    // handful of wlAi* functions the inline onclick/onkeydown attributes need.
+    window.wlAiHistory = window.wlAiHistory || [];
+    window.wlAiSelectedFile = null;
+
+    // Read the CSRF token independently — doesn't rely on the page defining
+    // CSRF_TOKEN or withCsrf() itself.
+    window.wlAiCsrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+    window.wlAiToggle = function () {
+        const panel = document.getElementById('wlAiPanel');
+        panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+    };
+
+    window.wlAiFileSelected = function () {
+        const input = document.getElementById('wlAiImageInput');
+        const label = document.getElementById('wlAiFileLabel');
+        if (input.files.length) {
+            window.wlAiSelectedFile = input.files[0];
+            label.style.display = 'block';
+            label.innerText = `📎 ${window.wlAiSelectedFile.name} — press send`;
+        }
+    };
+
+    function wlAiAppendMessage(text, who) {
+        const box = document.getElementById('wlAiMessages');
+        const div = document.createElement('div');
+        div.className = `wl-ai-msg wl-ai-msg-${who}`;
+        div.innerText = text;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    window.wlAiSend = async function () {
+        const input = document.getElementById('wlAiTextInput');
+        const text = input.value.trim();
+        if (!text && !window.wlAiSelectedFile) return;
+
+        wlAiAppendMessage(text || '[Logbook photo]', 'user');
+        input.value = '';
+        const sendingImage = window.wlAiSelectedFile;
+        window.wlAiSelectedFile = null;
+        document.getElementById('wlAiFileLabel').style.display = 'none';
+        document.getElementById('wlAiImageInput').value = '';
+
+        const thinkingId = 'wl-ai-thinking-' + Date.now();
+        const box = document.getElementById('wlAiMessages');
+        box.insertAdjacentHTML('beforeend', `<div class="wl-ai-msg wl-ai-msg-bot" id="${thinkingId}">…</div>`);
+        box.scrollTop = box.scrollHeight;
+
+        const formData = new FormData();
+        formData.append('text', text);
+        formData.append('history', JSON.stringify(window.wlAiHistory));
+        if (sendingImage) formData.append('image', sendingImage);
+
+        try {
+            const res = await fetch('/api/assistant/message', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': window.wlAiCsrfToken },
+                body: formData,
+            });
+            const data = await res.json();
+            document.getElementById(thinkingId)?.remove();
+
+            if (!res.ok) {
+                wlAiAppendMessage(data.error || 'Something went wrong.', 'bot');
+                return;
+            }
+
+            wlAiAppendMessage(data.reply, 'bot');
+            window.wlAiHistory.push({ role: 'user', content: data.user_content });
+            window.wlAiHistory.push({ role: 'assistant', content: data.assistant_content });
+
+            const extractedBox = document.getElementById('wlAiExtractedBox');
+            if (data.extracted) {
+                const v = data.extracted;
+                extractedBox.style.display = 'block';
+                extractedBox.innerHTML = `
+                    <div class="wl-ai-extracted">
+                        <strong>Extracted:</strong>
+                        <div>Reg: ${v.vehicle_reg || '—'}</div>
+                        <div>Chassis: ${v.chassis_number || '—'}</div>
+                        <div>Engine: ${v.engine_number || '—'}</div>
+                        <div>Make/Model: ${v.vehicle_make || '—'} ${v.vehicle_model || ''}</div>
+                        <div>Body: ${v.body_type || '—'}</div>
+                        <div>Year: ${v.year_of_manufacture || '—'}</div>
+                        <div>Seats: ${v.seats || '—'}</div>
+                        <button onclick="wlAiApplyToForm()">Use in quotation form</button>
+                    </div>`;
+                window.wlAiLastExtracted = v;
+            } else {
+                extractedBox.style.display = 'none';
+            }
+        } catch (err) {
+            document.getElementById(thinkingId)?.remove();
+            wlAiAppendMessage('Server communication error. Please try again.', 'bot');
+            console.error('Westlake Assistant error:', err);
+        }
+    };
+
+    // Only does anything on pages that have these field IDs (e.g. quotation.html) —
+    // harmless no-op everywhere else.
+   // Only works on quotation.html (Step 3, Vehicle Details) — harmless
+    // no-op elsewhere since these IDs won't exist on other pages.
+    window.wlAiApplyToForm = function () {
+        const v = window.wlAiLastExtracted;
+        if (!v) return;
+        const setIfExists = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+        setIfExists('vehicle_reg', v.vehicle_reg);
+        setIfExists('chassis_number', v.chassis_number);
+        setIfExists('engine_number', v.engine_number);
+        setIfExists('vehicle_make', v.vehicle_make);
+        setIfExists('vehicle_model', v.vehicle_model);
+        setIfExists('vehicle_body_type', v.body_type);
+        setIfExists('year_of_manufacture', v.year_of_manufacture);
+        setIfExists('year_of_registration', v.year_of_registration);
+        setIfExists('passengers_licensed_to_carry', v.seats);
+        wlAiAppendMessage('Applied to the quotation form.', 'bot');
+    };
+})();
+</script>
