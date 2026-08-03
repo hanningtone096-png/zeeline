@@ -4116,9 +4116,39 @@ def unflag_agent(agent_id):
 @admin_required
 @limiter.limit("10 per minute")
 def delete_user(target_user_id):
-    return jsonify({
-        "error": "Permanent user deletion is disabled. Suspend the account instead to preserve its records."
-    }), 405
+    if target_user_id == session.get('user_id'):
+        return jsonify({"error": "You cannot delete your own account."}), 400
+
+    target = query("SELECT id, role, full_name, username FROM users WHERE id=%s",
+                    (target_user_id,), fetchone=True)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+    if target['role'] == 'admin':
+        return jsonify({"error": "Admin accounts cannot be deleted through this endpoint."}), 400
+
+    try:
+        # Delete dependent records first (children before parent) to avoid FK errors.
+        query("DELETE FROM payments WHERE policy_no IN "
+              "(SELECT policy_no FROM policies WHERE agent_id=%s)", (target_user_id,), commit=True)
+        query("DELETE FROM policies WHERE agent_id=%s", (target_user_id,), commit=True)
+        query("DELETE FROM claims WHERE agent_id=%s", (target_user_id,), commit=True)
+        query("DELETE FROM quotations WHERE agent_id=%s", (target_user_id,), commit=True)
+        query("DELETE FROM clients WHERE agent_id=%s", (target_user_id,), commit=True)
+        query("DELETE FROM documents WHERE user_id=%s", (target_user_id,), commit=True)
+        query("DELETE FROM verification_codes WHERE user_id=%s", (target_user_id,), commit=True)
+        query("UPDATE declarations SET created_by=NULL WHERE created_by=%s", (target_user_id,), commit=True)
+        query("UPDATE audit_log SET user_id=NULL WHERE user_id=%s", (target_user_id,), commit=True)
+        query("DELETE FROM users WHERE id=%s", (target_user_id,), commit=True)
+    except Exception as e:
+        return safe_error_response(e, "Could not delete this agent. Some records may still reference them.")
+
+    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+          (session['user_id'], 'agent_deleted',
+           f"deleted_agent_id={target_user_id} name={target.get('full_name')} username={target.get('username')}"),
+          commit=True)
+
+    cache_delete_prefix("cache:dashboard")
+    return jsonify({"success": True})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
