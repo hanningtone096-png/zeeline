@@ -2642,18 +2642,18 @@ DIRECTLINE_MINIMUMS = {
     'commercial_vehicle':   40_000,
 }
 
+DIRECTLINE_TP_FLAT = {
+    'private':         3_171,
+    'motorcycle':      3_194,
+    'motorcycle_psv':  3_651,
+}
+
 DIRECTLINE_TONNAGE_TP = [
-    (0,    10,   5_665),
+    (0,    10,   3_890),
     (10.1, 15,  15_100),
     (15.1, 20,  20_100),
     (20.1, None,25_200),
 ]
-
-DIRECTLINE_TP_FLAT = {
-    'private':         4_580,
-    'motorcycle':      3_194,
-    'motorcycle_psv':  3_651,
-}
 def get_directline_comp_rate(product, value):
     if product in DIRECTLINE_COMP_TIERS:
         tiers = DIRECTLINE_COMP_TIERS[product]
@@ -3450,7 +3450,44 @@ def _fetch_pending_certificates(company=None):
         params = (company,)
     sql += " ORDER BY q.company, p.dmvic_issued_at"
     return query(sql, params)
+@app.route('/api/quotations/preview', methods=['POST'])
+@login_required
+@approved_required
+@limiter.limit("60 per minute")
+def preview_quotation_premium():
+    d = request.get_json() or {}
+    cover   = d.get('type_of_cover')
+    product = d.get('product')
+    cert    = d.get('type_of_certificate')
+    company = (d.get('company') or '').lower()
 
+    if not (cover and product and cert and company):
+        return jsonify({"error": "company, product, type_of_cover and type_of_certificate are required"}), 400
+
+    try:
+        value = float(d.get('vehicle_value', 0) or 0)
+    except (ValueError, TypeError):
+        value = 0
+
+    try:
+        calc = calculate_premium(
+            cover, product, value, cert,
+            seats=int(d.get('seats', 0) or 0),
+            company=company,
+            tonnage=float(d.get('tonnage', 0) or 0),
+            sub_type=d.get('sub_type'),
+            pax=int(d.get('pax', 0) or 0),
+        )
+    except UnsupportedInsurerProductError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return safe_error_response(e, "Could not calculate a premium estimate.")
+
+    return jsonify({
+        "base_premium":     calc["base_premium"],
+        "levies_and_taxes": calc["levies_and_taxes"],
+        "total_payable":    calc["total_payable"],
+    })
 
 @app.route('/api/admin/declarations/pending')
 @login_required
