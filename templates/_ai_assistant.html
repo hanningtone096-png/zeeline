@@ -7,11 +7,12 @@
 #wlAiBubble {
     position: fixed; bottom: 22px; right: 22px;
     width: 56px; height: 56px; border-radius: 50%;
-    background: #2563eb; color: #fff;
+    background: #fff;
     display: flex; align-items: center; justify-content: center;
-    font-size: 22px; cursor: pointer;
-    box-shadow: 0 4px 14px rgba(37,99,235,.4);
-    z-index: 9999; border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25);
+    z-index: 9999; border: 2px solid #2563eb;
+    padding: 0; overflow: hidden;
 }
 #wlAiPanel {
     display: none; flex-direction: column;
@@ -45,14 +46,14 @@
 </style>
 
 <button id="wlAiBubble" onclick="wlAiToggle()" aria-label="Open Westlake Assistant" title="Ask Westlake Assistant">
-    <i class="fas fa-robot"></i>
+    <img src="/css/images/zeeline_logo.jpg" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
 </button>
 
 <div id="wlAiPanel">
-    <div class="wl-ai-header">
-        <span><i class="fas fa-robot"></i> Westlake Assistant</span>
-        <button onclick="wlAiToggle()" aria-label="Close">✕</button>
-    </div>
+  <div class="wl-ai-header">
+    <span><img src="/css/images/zeeline_logo.jpg" alt="" style="width:18px;height:18px;border-radius:50%;vertical-align:middle;margin-right:6px;"> Westlake Assistant</span>
+    <button onclick="wlAiToggle()" aria-label="Close">✕</button>
+</div>
     <div id="wlAiMessages" class="wl-ai-messages">
         <div class="wl-ai-msg wl-ai-msg-bot">Hi! Ask me anything about using Westlake, or attach a logbook photo and I'll read the vehicle details for you.</div>
     </div>
