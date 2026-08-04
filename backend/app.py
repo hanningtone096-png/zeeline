@@ -2331,6 +2331,56 @@ def api_available_periods():
     return jsonify({"periods": available_periods(company, product, cover)})
 
 
+@app.route('/api/quotations/premium-comparison', methods=['POST'])
+@login_required
+@approved_required
+@limiter.limit("60 per minute")
+def quotation_premium_comparison():
+    """Preview all supported insurers using the production rating engine."""
+    d = request.get_json() or {}
+    product = (d.get('product') or '').strip()
+    cover = (d.get('type_of_cover') or '').strip()
+    certificate = (d.get('type_of_certificate') or '').strip()
+    if not all((product, cover, certificate)):
+        return jsonify({"error": "Product, cover type and certificate type are required."}), 400
+    try:
+        value = float(d.get('vehicle_value', 0) or 0)
+        seats = int(d.get('seats', 0) or 0)
+        tonnage = float(d.get('tonnage', 0) or 0)
+        pax = int(d.get('pax', 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Rating inputs must be valid numbers."}), 400
+
+    comparisons = []
+    for company in ('directline', 'monarch', 'definite'):
+        if not insurer_offers(company, product, cover):
+            comparisons.append({"company": company, "available": False,
+                                "reason": "This insurer does not offer this product and cover."})
+            continue
+        if certificate not in available_periods(company, product, cover):
+            comparisons.append({"company": company, "available": False,
+                                "reason": "This certificate period is not offered for the selected product."})
+            continue
+        try:
+            calculation = calculate_premium(
+                cover, product, value, certificate, seats=seats, company=company,
+                tonnage=tonnage, sub_type=d.get('sub_type') or None, pax=pax,
+            )
+        except (UnsupportedInsurerProductError, TypeError, ValueError) as exc:
+            comparisons.append({"company": company, "available": False, "reason": str(exc)})
+            continue
+        comparisons.append({
+            "company": company,
+            "available": True,
+            "base_premium": calculation["base_premium"],
+            "levies_and_taxes": calculation["levies_and_taxes"],
+            "total_payable": calculation["total_payable"],
+            "note": calculation.get("rate_applied"),
+        })
+    comparisons.sort(key=lambda item: (not item["available"], item.get("total_payable", float("inf"))))
+    return jsonify({"comparisons": comparisons})
+
+
 @app.route('/api/quotations/lookup-by-reg')
 @login_required
 @approved_required

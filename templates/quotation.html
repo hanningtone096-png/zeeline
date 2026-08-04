@@ -26,6 +26,26 @@
 .insurer-logo { width:44px; height:44px; background:#2563eb; color:#fff; display:flex; align-items:center; justify-content:center; border-radius:50%; font-weight:bold; font-size:14px; margin:0 auto 8px; }
 .insurer-logo-img { width:56px; height:56px; object-fit:contain; margin:0 auto 8px; display:block; border-radius:8px; background:#fff; padding:4px; }
 
+.premium-comparison { margin-top:22px; padding-top:18px; border-top:1px solid #dbe5f1; }
+.premium-comparison-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.premium-comparison-head h3 { margin:0; color:#1e293b; font-size:16px; }
+.premium-comparison-head p { margin:4px 0 0; color:#64748b; font-size:13px; }
+.comparison-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; }
+.comparison-card { min-height:156px; padding:14px; border:1px solid #dbe5f1; border-radius:8px; background:#fff; display:flex; flex-direction:column; gap:8px; transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.comparison-card:hover { border-color:#93c5fd; box-shadow:0 6px 16px rgba(37,99,235,.09); transform:translateY(-1px); }
+.comparison-card.selected { border:2px solid #2563eb; background:#eff6ff; padding:13px; }
+.comparison-card.unavailable { background:#f8fafc; border-style:dashed; color:#64748b; }
+.comparison-brand { display:flex; align-items:center; gap:10px; }
+.comparison-logo { width:36px; height:36px; object-fit:contain; border:1px solid #e2e8f0; border-radius:6px; background:#fff; padding:3px; }
+.comparison-brand strong { color:#1e293b; font-size:14px; }
+.comparison-status { color:#15803d; font-size:12px; font-weight:700; }
+.comparison-card.unavailable .comparison-status { color:#64748b; }
+.comparison-price { color:#0f5132; font-size:21px; font-weight:750; line-height:1.15; }
+.comparison-meta { color:#64748b; font-size:11px; min-height:16px; }
+.comparison-card button { margin-top:auto; width:100%; padding:8px 10px; font-size:13px; }
+.comparison-placeholder { grid-column:1/-1; padding:15px; border:1px dashed #cbd5e1; border-radius:8px; color:#64748b; font-size:13px; }
+@media (prefers-reduced-motion:reduce) { .comparison-card { transition:none; } .comparison-card:hover { transform:none; } }
+
 .product-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:15px; }
 .select-card { border:2px solid #e2e8f0; padding:14px; border-radius:8px; cursor:pointer; transition:.2s; background:#fff; text-align:center; font-weight:600; font-size:14px; color:#334155; }
 .select-card:hover { border-color:#93c5fd; }
@@ -214,23 +234,11 @@
 </div>
 
 <div class="form-group">
-    <label>Insurance Company *</label>
-    <div class="insurer-grid">
-        <div class="insurer-card" data-value="monarch">
-            <img class="insurer-logo-img" src="/css/images/monarch.png" alt="Monarch"><h3>Monarch</h3><p>Motor Insurance</p>
-        </div>
-        <div class="insurer-card" data-value="directline">
-            <img class="insurer-logo-img" src="/css/images/directline.png" alt="Directline"><h3>Directline</h3><p>Comprehensive Cover</p>
-        </div>
-        <div class="insurer-card" data-value="definite">
-            <img class="insurer-logo-img" src="/css/images/definite.png" alt="Definite"><h3>Definite</h3><p>Flexible Protection</p>
-        </div>
-        <div class="insurer-card disabled" data-value="jubilee" data-disabled="true">
-            <div class="insurer-logo">J</div><h3>Jubilee</h3><p class="coming-soon-tag">Coming Soon</p>
-        </div>
-        <div class="insurer-card disabled" data-value="britam" data-disabled="true">
-            <div class="insurer-logo">B</div><h3>Britam</h3><p class="coming-soon-tag">Coming Soon</p>
-        </div>
+    <label>Product *</label>
+    <div class="product-grid" id="productGrid"><div class="loading-note">Loading available products…</div></div>
+    <div id="subTypeRow">
+        <label style="font-size:12px; color:#94a3b8; margin-top:8px;" id="subTypeLabel">Use Type *</label>
+        <div class="subtype-chip-row" id="subTypeChips"></div>
     </div>
 </div>
 
@@ -260,18 +268,6 @@
 </div>
 
 <div class="form-group">
-    <label>Product * <span id="productInsurerLabel" style="font-weight:400; color:#94a3b8;"></span></label>
-    <div class="product-grid" id="productGrid">
-        <div class="loading-note">Select an insurance company above to see available products.</div>
-    </div>
-
-    <div id="subTypeRow">
-        <label style="font-size:12px; color:#94a3b8; margin-top:8px;" id="subTypeLabel">Use Type *</label>
-        <div class="subtype-chip-row" id="subTypeChips"></div>
-    </div>
-</div>
-
-<div class="form-group">
     <label>Policy Validity *</label>
     <div class="grid-2">
         <div>
@@ -285,6 +281,17 @@
     </div>
     <small id="validityHint" style="color:#64748b; display:none;"></small>
 </div>
+
+<div class="grid-2">
+    <div class="form-group"><label for="passengers_licensed_to_carry">Seats / Passengers *</label><input id="passengers_licensed_to_carry" type="number" min="1" placeholder="e.g. 5"></div>
+    <div class="form-group"><label for="vehicle_value">Vehicle Value (KES) *</label><input id="vehicle_value" type="number" min="0" placeholder="e.g. 1500000"><small style="color:#64748b;">Required for Comprehensive &amp; TPFT. Not required for Third Party Only.</small></div>
+</div>
+<div class="form-group" id="tonnageRow"><label for="tonnage">Tonnage (Commercial Vehicle) *</label><input id="tonnage" type="number" min="0" step="0.1" placeholder="e.g. 3.5"></div>
+<div class="form-group" id="paxRow"><label for="pax">Number of Passengers (for TPO banding) *</label><input id="pax" type="number" min="0" placeholder="e.g. 14"><small style="color:#64748b;">Used to place this vehicle in the correct passenger band for Third Party Only premiums.</small></div>
+<section class="premium-comparison" aria-live="polite" aria-labelledby="premiumComparisonTitle">
+    <div class="premium-comparison-head"><div><h3 id="premiumComparisonTitle"><i class="fas fa-scale-balanced" style="color:#2563eb;"></i> Available Premiums</h3><p>Choose an insurer after comparing the live premium for this cover.</p></div></div>
+    <div class="comparison-grid" id="premiumComparisonCards"><div class="comparison-placeholder">Select a product, cover and certificate type to compare insurers.</div></div>
+</section>
 
 <div class="nav-buttons">
     <div></div>
@@ -396,10 +403,6 @@
         <label for="vehicle_body_type">Body Type *</label>
         <input id="vehicle_body_type" placeholder="e.g. Saloon, Pickup, Minibus">
     </div>
-    <div class="form-group">
-        <label for="passengers_licensed_to_carry">Seats / Passengers *</label>
-        <input id="passengers_licensed_to_carry" type="number" min="1" placeholder="e.g. 5">
-    </div>
 </div>
 <div class="grid-2">
     <div class="form-group">
@@ -407,23 +410,6 @@
         <input id="year_of_manufacture" type="number" min="1970" max="2026" placeholder="e.g. 2019">
         <small style="color:#64748b;">Optional unless the selected insurer requires it for the chosen cover.</small>
     </div>
-</div>
-
-<div class="form-group" id="tonnageRow">
-    <label for="tonnage">Tonnage (Commercial Vehicle) *</label>
-    <input id="tonnage" type="number" min="0" step="0.1" placeholder="e.g. 3.5">
-</div>
-
-<div class="form-group" id="paxRow">
-    <label for="pax">Number of Passengers (for TPO banding) *</label>
-    <input id="pax" type="number" min="0" placeholder="e.g. 14">
-    <small style="color:#64748b;">Used to place this vehicle in the correct passenger-band for Third Party Only premiums.</small>
-</div>
-
-<div class="form-group">
-    <label for="vehicle_value">Vehicle Value (KES) *</label>
-    <input id="vehicle_value" type="number" min="0" placeholder="e.g. 1500000">
-    <small style="color:#64748b;">Required for Comprehensive &amp; TPFT. Not required for Third Party Only.</small>
 </div>
 
 <div class="nav-buttons">
@@ -464,6 +450,7 @@ function withCsrf(headers = {}) {
 const data = {
     company:null, type_of_cover:'', type_of_certificate:'',
     product:null, sub_type:null, pax:0, business_type:'new', parent_policy_no:null,
+    extension_company:null, selected_premium:null,
     commencing_date:'', expiry_date:'',
     policy_holder_name:'', email:'', phone:'', kra_pin:'', id_number:'', postal_address:'',
     vehicle_reg:'', chassis_number:'', vehicle_body_type:'',
@@ -472,6 +459,12 @@ const data = {
 };
 
 let INSURER_CATALOG = {};
+const COMPARISON_COMPANIES = ['directline', 'monarch', 'definite'];
+const COMPANY_LOGOS = {
+    directline: '/css/images/directline.png',
+    monarch: '/css/images/monarch.png',
+    definite: '/css/images/definite.png'
+};
 
 const SUBTYPE_GROUPS = {
     tuktuk: {
@@ -523,6 +516,7 @@ async function loadInsurerCatalog() {
         const res = await fetch('/api/insurers/products');
         const r = await res.json();
         INSURER_CATALOG = r.insurers || {};
+        renderProductGrid();
     } catch (err) {
         showError('Could not load insurer product list. Please refresh the page.');
     }
@@ -652,26 +646,30 @@ document.querySelectorAll('[data-value][id^="bt"]').forEach(card => {
         card.classList.add('selected');
         data.business_type = card.dataset.value;
         data.parent_policy_no = null;
+        data.extension_company = null;
+        if (data.business_type === 'new') {
+            data.company = null;
+            data.selected_premium = null;
+        }
         document.getElementById('extensionLookupRow').style.display =
             data.business_type === 'extension' ? 'block' : 'none';
         document.getElementById('extLookupMsg').innerText = '';
         applyValidityRules();
+        schedulePremiumComparison();
     });
 });
 
 async function refreshAvailablePeriods() {
     const select = document.getElementById('type_of_certificate');
-    if (!data.company || !data.product) return;
+    if (!data.product) return;
     try {
-        const params = new URLSearchParams({
-            company: data.company,
-            product: data.product,
-            cover: document.getElementById('type_of_cover').value || '',
-        });
-        const response = await fetch(`/api/insurers/periods?${params.toString()}`);
-        const result = await response.json();
-        if (!response.ok || !Array.isArray(result.periods)) return;
-        const allowed = new Set(result.periods);
+        const cover = document.getElementById('type_of_cover').value || '';
+        const results = await Promise.all(COMPARISON_COMPANIES.map(async company => {
+            const params = new URLSearchParams({ company, product:data.product, cover });
+            const response = await fetch(`/api/insurers/periods?${params.toString()}`);
+            return response.ok ? response.json() : { periods: [] };
+        }));
+        const allowed = new Set(results.flatMap(result => Array.isArray(result.periods) ? result.periods : []));
         select.querySelectorAll('option').forEach(option => {
             if (!option.value) return;
             option.hidden = !allowed.has(option.value);
@@ -680,6 +678,7 @@ async function refreshAvailablePeriods() {
         if (select.value && !allowed.has(select.value)) select.value = '';
         data.type_of_certificate = select.value;
         applyValidityRules();
+        schedulePremiumComparison();
     } catch (_) {
         // Server-side validation remains authoritative if this convenience
         // refresh is unavailable.
@@ -689,44 +688,25 @@ async function refreshAvailablePeriods() {
 document.getElementById('type_of_certificate').addEventListener('change', function() {
     data.type_of_certificate = this.value;
     applyValidityRules();
+    schedulePremiumComparison();
 });
 
 document.getElementById('type_of_cover').addEventListener('change', refreshAvailablePeriods);
 
-document.querySelectorAll('.insurer-card').forEach(c => {
-    c.onclick = () => {
-        if (c.dataset.disabled === 'true') {
-            showError(`${c.querySelector('h3').innerText} is coming soon. Please choose another insurer for now.`);
-            return;
-        }
-        document.querySelectorAll('.insurer-card').forEach(i => i.classList.remove('selected'));
-        c.classList.add('selected');
-        data.company = c.dataset.value;
-
-        data.product = null;
-        data.sub_type = null;
-        document.getElementById('type_of_cover').value = '';
-        document.getElementById('coverHint').innerText = '';
-        document.getElementById('subTypeRow').style.display = 'none';
-        document.getElementById('tonnageRow').style.display = 'none';
-        document.getElementById('paxRow').style.display = 'none';
-
-        renderProductGrid(c.dataset.value);
-        document.getElementById('productInsurerLabel').innerText =
-            `— showing products offered by ${cap(c.dataset.value)}`;
-    };
-});
-
-function renderProductGrid(company) {
+function renderProductGrid() {
     const grid = document.getElementById('productGrid');
-    const catalog = INSURER_CATALOG[company];
-
-    if (!catalog) {
-        grid.innerHTML = '<div class="product-empty">No product catalog available for this insurer yet.</div>';
+    const entriesByProduct = new Map();
+    Object.entries(INSURER_CATALOG).forEach(([company, catalog]) => {
+        Object.entries(catalog || {}).forEach(([key, info]) => {
+            if (!entriesByProduct.has(key)) entriesByProduct.set(key, { ...info, companies: [] });
+            entriesByProduct.get(key).companies.push(company);
+        });
+    });
+    if (!entriesByProduct.size) {
+        grid.innerHTML = '<div class="product-empty">No insurer product catalog is available yet.</div>';
         return;
     }
-
-    const entries = Object.entries(catalog);
+    const entries = [...entriesByProduct.entries()];
     const seen = new Set();
     let html = '';
 
@@ -780,12 +760,12 @@ function wireProductCards() {
                 subTypeRow.style.display = 'none';
                 data.product = val;
 
-                if (data.company === 'definite' && val === 'motorcycle_psv') {
+                if (val === 'motorcycle_psv') {
                     renderSubTypeChips('motorcycle_psv_rating');
                     subTypeRow.style.display = 'block';
                 }
 
-                if (data.company === 'definite' && val === 'commercial_hybrid') {
+                if (val === 'commercial_hybrid') {
                     renderSubTypeChips('commercial_hybrid_type');
                     subTypeRow.style.display = 'block';
                 }
@@ -795,6 +775,7 @@ function wireProductCards() {
             }
 
             updateCoverOptions();
+            schedulePremiumComparison();
         };
     });
 }
@@ -829,21 +810,22 @@ function renderSubTypeChips(groupKey) {
 function updateCoverOptions() {
     const coverSelect = document.getElementById('type_of_cover');
     const hint = document.getElementById('coverHint');
-    const catalog = INSURER_CATALOG[data.company] || {};
-    const info = catalog[data.product];
+    const matchingProducts = Object.entries(INSURER_CATALOG)
+        .map(([company, catalog]) => ({ company, info: (catalog || {})[data.product] }))
+        .filter(entry => entry.info);
 
     coverSelect.querySelectorAll('.cover-option').forEach(opt => {
         opt.classList.remove('disabled-option');
         opt.disabled = false;
     });
 
-    if (!info) {
+    if (!matchingProducts.length) {
         hint.innerText = '';
         refreshAvailablePeriods();
         return;
     }
 
-    const allowed = new Set(info.covers || []);
+    const allowed = new Set(matchingProducts.flatMap(entry => entry.info.covers || []));
     coverSelect.querySelectorAll('.cover-option').forEach(opt => {
         if (!allowed.has(opt.value)) {
             opt.classList.add('disabled-option');
@@ -856,14 +838,136 @@ function updateCoverOptions() {
     }
 
     const coverLabels = { comprehensive:'Comprehensive', third_party_only:'Third Party Only', third_party_fire_theft:'Third Party Fire & Theft' };
-    hint.innerText = `Available cover for ${info.label}: ${[...allowed].map(c => coverLabels[c] || c).join(', ')}`;
+    hint.innerText = `Available cover: ${[...allowed].map(c => coverLabels[c] || c).join(', ')}`;
     refreshAvailablePeriods();
+    schedulePremiumComparison();
 }
 
+let premiumComparisonTimer = null;
+let premiumComparisonRequest = 0;
+let premiumComparisonResults = [];
+
+function comparisonPayload() {
+    return {
+        product: data.product,
+        sub_type: data.sub_type,
+        type_of_cover: document.getElementById('type_of_cover').value,
+        type_of_certificate: document.getElementById('type_of_certificate').value,
+        seats: Number(document.getElementById('passengers_licensed_to_carry').value || 0),
+        vehicle_value: Number(document.getElementById('vehicle_value').value || 0),
+        tonnage: Number(document.getElementById('tonnage').value || 0),
+        pax: Number(document.getElementById('pax').value || 0),
+    };
+}
+
+function comparisonReadiness(payload) {
+    if (!payload.product || !payload.type_of_cover || !payload.type_of_certificate) {
+        return 'Select a product, cover and certificate type to compare insurers.';
+    }
+    if (payload.seats < 1) return 'Enter the number of seats to compare premiums.';
+    if (payload.type_of_cover !== 'third_party_only' && payload.vehicle_value <= 0) {
+        return 'Enter the vehicle value to compare Comprehensive or TPFT premiums.';
+    }
+    if (document.getElementById('tonnageRow').style.display !== 'none' && payload.tonnage <= 0) {
+        return 'Enter the vehicle tonnage to compare premiums.';
+    }
+    if (document.getElementById('paxRow').style.display !== 'none' && payload.pax <= 0) {
+        return 'Enter the passenger count to compare premiums.';
+    }
+    if (payload.product === 'commercial_hybrid' && !payload.sub_type) {
+        return 'Choose the commercial use type to compare premiums.';
+    }
+    return '';
+}
+
+function renderPremiumComparison(items = [], placeholder = '') {
+    const wrapper = document.getElementById('premiumComparisonCards');
+    if (placeholder) {
+        wrapper.innerHTML = `<div class="comparison-placeholder">${esc(placeholder)}</div>`;
+        return;
+    }
+    wrapper.innerHTML = items.map(item => {
+        const selected = item.company === data.company;
+        const extensionMismatch = data.business_type === 'extension' && data.extension_company &&
+            item.company !== data.extension_company;
+        const available = item.available && !extensionMismatch;
+        const reason = extensionMismatch
+            ? 'Extensions must stay with the insurer on the original policy.'
+            : (item.reason || 'This insurer does not offer this selection.');
+        const logo = COMPANY_LOGOS[item.company];
+        const price = Number(item.total_payable || 0).toLocaleString('en-KE', {
+            style: 'currency', currency: 'KES', maximumFractionDigits: 0
+        });
+        return `<article class="comparison-card${selected ? ' selected' : ''}${available ? '' : ' unavailable'}">
+            <div class="comparison-brand">${logo ? `<img class="comparison-logo" src="${logo}" alt="${esc(cap(item.company))} logo">` : ''}<strong>${esc(cap(item.company))}</strong></div>
+            <div class="comparison-status"><i class="fas ${available ? 'fa-circle-check' : 'fa-circle-minus'}"></i> ${available ? 'Available' : 'Not available'}</div>
+            ${available ? `<div class="comparison-price">${price}</div><div class="comparison-meta">${esc(item.note || 'Includes levies and taxes')}</div>` : `<div class="comparison-meta">${esc(reason)}</div>`}
+            ${available ? `<button type="button" onclick="selectComparisonCompany('${item.company}', ${Number(item.total_payable || 0)})">${selected ? 'Selected' : 'Choose'}</button>` : ''}
+        </article>`;
+    }).join('');
+}
+
+function selectComparisonCompany(company, premium) {
+    if (data.business_type === 'extension' && data.extension_company && company !== data.extension_company) {
+        showError('An extension must use the insurer on the original installment policy.');
+        return;
+    }
+    data.company = company;
+    data.selected_premium = premium;
+    clearError();
+    renderPremiumComparison(premiumComparisonResults);
+}
+
+function schedulePremiumComparison() {
+    window.clearTimeout(premiumComparisonTimer);
+    premiumComparisonTimer = window.setTimeout(loadPremiumComparison, 180);
+}
+
+async function loadPremiumComparison() {
+    const payload = comparisonPayload();
+    const missing = comparisonReadiness(payload);
+    if (missing) {
+        premiumComparisonResults = [];
+        renderPremiumComparison([], missing);
+        return;
+    }
+    const requestNumber = ++premiumComparisonRequest;
+    renderPremiumComparison([], 'Calculating available premiums…');
+    try {
+        const response = await fetch('/api/quotations/premium-comparison', {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not calculate premiums.');
+        if (requestNumber !== premiumComparisonRequest) return;
+        premiumComparisonResults = result.comparisons || [];
+        const selected = premiumComparisonResults.find(item => item.company === data.company && item.available);
+        if (data.company && !selected) {
+            data.company = null;
+            data.selected_premium = null;
+            showError('Your selected insurer is not available for the updated options. Choose another insurer.');
+        } else if (selected) {
+            data.selected_premium = selected.total_payable;
+        }
+        renderPremiumComparison(premiumComparisonResults);
+    } catch (error) {
+        if (requestNumber !== premiumComparisonRequest) return;
+        premiumComparisonResults = [];
+        renderPremiumComparison([], error.message || 'Could not calculate premiums.');
+    }
+}
+
+['passengers_licensed_to_carry', 'vehicle_value', 'tonnage', 'pax'].forEach(id => {
+    const field = document.getElementById(id);
+    field.addEventListener('input', schedulePremiumComparison);
+    field.addEventListener('change', schedulePremiumComparison);
+});
+
 function selectInsurerForExtension(company) {
-    const card = [...document.querySelectorAll('.insurer-card')]
-        .find(item => item.dataset.value === company);
-    if (card) card.click();
+    data.company = company;
+    data.extension_company = company;
 }
 
 function selectProductForExtension(product) {
@@ -955,14 +1059,24 @@ function nextStep() {
         data.commencing_date     = document.getElementById('commencing_date').value;
         data.expiry_date         = document.getElementById('expiry_date').value;
 
-        if (!data.company)             return showError('Please select an insurance company.');
         if (!data.product)             return showError('Please select a product (and use type, where applicable).');
-        if (data.company === 'definite' && data.product === 'commercial_hybrid' && !data.sub_type)
+        if (data.product === 'commercial_hybrid' && !data.sub_type)
             return showError('Please select a Commercial Use Type (Own Goods / General Cartage / Prime Mover).');
         if (!data.type_of_cover)       return showError('Please select a type of cover.');
         if (!data.type_of_certificate) return showError('Please select a certificate type.');
         if (!data.commencing_date)     return showError('Please enter the commencing date.');
         if (!data.expiry_date)         return showError('Please enter the expiry date.');
+        const rating = comparisonPayload();
+        if (rating.seats < 1) return showError('Please enter the number of seats.');
+        if (rating.type_of_cover !== 'third_party_only' && rating.vehicle_value <= 0)
+            return showError('Vehicle value is required for this cover type.');
+        if (document.getElementById('tonnageRow').style.display !== 'none' && rating.tonnage <= 0)
+            return showError('Tonnage is required for this vehicle type.');
+        if (document.getElementById('paxRow').style.display !== 'none' && rating.pax <= 0)
+            return showError('Number of passengers is required for this vehicle type.');
+        if (!data.company) return showError('Compare the available premiums, then choose an insurer.');
+        if (!premiumComparisonResults.some(item => item.company === data.company && item.available))
+            return showError('The premium comparison is still updating. Please choose an available insurer.');
         if (data.business_type === 'extension' && !data.parent_policy_no)
             return showError('Fetch the prior installment policy before continuing with an extension.');
         if (data.business_type === 'extension' && !isInstallmentPlan())
