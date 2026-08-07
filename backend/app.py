@@ -171,6 +171,14 @@ init_assistant(app)
 
 @app.errorhandler(CSRFError)
 def handle_csrf_error(error):
+    log.warning(
+        "CSRF validation failed: %s (host=%s, session_cookie=%s, csrf_header=%s, referrer=%s)",
+        error.description,
+        request.host,
+        bool(request.cookies.get('session')),
+        bool(request.headers.get('X-CSRFToken')),
+        request.referrer,
+    )
     return jsonify({"error": "Your form session expired. Refresh the page and try again."}), 400
 
 @app.context_processor
