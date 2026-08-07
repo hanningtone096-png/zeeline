@@ -37,10 +37,10 @@ module.exports = async (request, response) => {
     headers.set(name, Array.isArray(value) ? value.join(', ') : value);
   }
 
-  // Flask-WTF checks the HTTPS referrer against request.host. Keep the public
-  // host while the TLS connection itself is made to the private API origin.
+  // Flask-WTF checks the HTTPS referrer against request.host. The API's Nginx
+  // proxy restores this trusted public host before forwarding to Flask.
   const publicHost = request.headers.host || 'zeelineinsurance.tech';
-  headers.set('host', publicHost);
+  headers.set('x-zeeline-public-host', publicHost);
   headers.set('x-forwarded-host', publicHost);
   headers.set('x-forwarded-proto', 'https');
 
