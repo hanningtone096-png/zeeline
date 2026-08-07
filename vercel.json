@@ -1,8 +1,12 @@
 {
-  "rewrites": [
+  "routes": [
     {
-      "source": "/(.*)",
-      "destination": "https://api.zeelineinsurance.tech/$1"
+      "src": "/api/(.*)",
+      "dest": "/api/proxy?path=$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "https://api.zeelineinsurance.tech/$1"
     }
   ]
 }

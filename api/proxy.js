@@ -20,20 +20,11 @@ function requestBody(request) {
 }
 
 function upstreamPath(request) {
-  const parts = Array.isArray(request.query.path)
-    ? request.query.path
-    : [request.query.path].filter(Boolean);
-  const query = new URLSearchParams();
-
-  for (const [name, value] of Object.entries(request.query)) {
-    if (name === 'path' || value === undefined) continue;
-    for (const item of Array.isArray(value) ? value : [value]) {
-      query.append(name, String(item));
-    }
-  }
-
-  const suffix = query.toString();
-  return `/api/${parts.map(encodeURIComponent).join('/')}${suffix ? `?${suffix}` : ''}`;
+  const incoming = new URL(request.url, 'https://proxy.invalid');
+  const path = incoming.searchParams.get('path') || '';
+  incoming.searchParams.delete('path');
+  const query = incoming.searchParams.toString();
+  return `/api/${path}${query ? `?${query}` : ''}`;
 }
 
 module.exports = async (request, response) => {
