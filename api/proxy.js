@@ -29,6 +29,8 @@ function upstreamPath(request) {
 
 module.exports = async (request, response) => {
   const headers = new Headers();
+  const hasSessionCookie = Boolean(request.headers.cookie);
+  const hasCsrfHeader = Boolean(request.headers['x-csrftoken']);
   for (const [name, value] of Object.entries(request.headers)) {
     const normalizedName = name.toLowerCase();
     if (value === undefined || HOP_BY_HOP_HEADERS.has(normalizedName) || normalizedName === 'host') continue;
@@ -66,6 +68,8 @@ module.exports = async (request, response) => {
 
     response.setHeader('cache-control', 'private, no-store, max-age=0, must-revalidate');
     response.setHeader('x-zeeline-api-relay', '1');
+    response.setHeader('x-zeeline-relay-session', hasSessionCookie ? '1' : '0');
+    response.setHeader('x-zeeline-relay-csrf', hasCsrfHeader ? '1' : '0');
     response.status(upstream.status).send(Buffer.from(await upstream.arrayBuffer()));
   } catch (error) {
     response.status(502).json({ error: 'The insurance service is temporarily unavailable.' });
