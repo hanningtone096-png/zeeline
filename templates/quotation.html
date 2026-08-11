@@ -139,6 +139,59 @@
 .dmvic-confirm-reason { margin:12px 0; padding:10px 12px; border:1px solid #fecaca; border-radius:6px; background:#fef2f2; color:#991b1b; font-size:13px; line-height:1.45; }
 .dmvic-confirm-check { display:flex; align-items:flex-start; gap:8px; margin:10px 0; color:#334155; font-size:13px; font-weight:600; }
 .dmvic-confirm-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:16px; }
+
+/* ── Comparison compact/expand toggle (used on all sizes, matters most on mobile) ── */
+.comparison-summary-card {
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    padding:14px 16px; border:2px solid #2563eb; background:#eff6ff; border-radius:8px;
+}
+.comparison-summary-card .cs-brand { display:flex; align-items:center; gap:10px; }
+.comparison-summary-card .cs-brand strong { color:#1e293b; font-size:14px; }
+.comparison-summary-card .cs-price { color:#0f5132; font-size:19px; font-weight:750; }
+.comparison-toggle-btn {
+    background:none; border:1px solid #bfdbfe; color:#2563eb; font-size:12px; font-weight:700;
+    padding:8px 12px; border-radius:6px; cursor:pointer; white-space:nowrap;
+}
+.comparison-toggle-btn:hover { background:#eff6ff; }
+.comparison-show-less { display:block; margin:10px auto 0; background:none; border:none; color:#2563eb; font-size:13px; font-weight:600; cursor:pointer; padding:8px; }
+
+/* ══════════════════════════ MOBILE UX PASS ══════════════════════════
+   Quotation wizard: keep Next/Back always reachable (fixed bottom bar),
+   single-column forms, bigger tap targets, no iOS input zoom, and a
+   collapsed premium-comparison view once an insurer is picked. */
+@media (max-width:900px) {
+    .form-card { padding:18px 16px 90px; border-radius:10px; }
+
+    .grid-2 { grid-template-columns:1fr; gap:0; }
+    .grid-2 .form-group { margin-bottom:15px; }
+
+    .product-grid { grid-template-columns:repeat(2,1fr); gap:10px; }
+    .select-card { padding:16px 10px; min-height:56px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+
+    .comparison-grid { grid-template-columns:1fr; }
+    .comparison-card { min-height:0; }
+    .comparison-card button { padding:12px 10px; font-size:14px; }
+
+    .subtype-chip { padding:10px 16px; }
+
+    .form-group input, .form-group select, .form-group textarea {
+        font-size:16px; /* prevents iOS Safari auto-zoom on focus */
+        padding:12px;
+    }
+
+    .period-grid { grid-template-columns:repeat(2,1fr); }
+
+    /* Fixed bottom action bar so Next/Back/Review/Generate never scroll offscreen */
+    .nav-buttons {
+        position:fixed; left:0; right:0; bottom:0; z-index:150;
+        background:#fff; border-top:1px solid #e2e8f0;
+        margin:0; padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+        box-shadow:0 -6px 16px rgba(15,23,42,.08);
+    }
+    .nav-buttons button { flex:1; padding:13px 10px; font-size:15px; }
+
+    .buy-cover-btn { width:100%; justify-content:center; }
+}
 </style>
 </head>
 
@@ -846,6 +899,7 @@ function updateCoverOptions() {
 let premiumComparisonTimer = null;
 let premiumComparisonRequest = 0;
 let premiumComparisonResults = [];
+let comparisonExpanded = true; // collapsed to a summary once an insurer is chosen, on all screen sizes
 
 function comparisonPayload() {
     return {
@@ -886,6 +940,27 @@ function renderPremiumComparison(items = [], placeholder = '') {
         wrapper.innerHTML = `<div class="comparison-placeholder">${esc(placeholder)}</div>`;
         return;
     }
+
+    // Once an insurer is chosen, collapse the grid to a one-line summary —
+    // this is the biggest scroll offender on Step 1, so no need to keep it
+    // expanded after the decision is made. "Compare other insurers" reopens it.
+    const selectedItem = items.find(item => item.company === data.company && item.available);
+    if (selectedItem && !comparisonExpanded) {
+        const logo = COMPANY_LOGOS[selectedItem.company];
+        const price = Number(selectedItem.total_payable || 0).toLocaleString('en-KE', {
+            style: 'currency', currency: 'KES', maximumFractionDigits: 0
+        });
+        wrapper.innerHTML = `<div class="comparison-summary-card">
+            <div class="cs-brand">${logo ? `<img class="comparison-logo" src="${logo}" alt="${esc(cap(selectedItem.company))} logo">` : ''}
+                <div><strong>${esc(cap(selectedItem.company))}</strong><div class="cs-price">${price}</div></div>
+            </div>
+            <button type="button" class="comparison-toggle-btn" onclick="expandComparison()">
+                <i class="fas fa-arrows-rotate"></i> Compare other insurers
+            </button>
+        </div>`;
+        return;
+    }
+
     wrapper.innerHTML = items.map(item => {
         const selected = item.company === data.company;
         const extensionMismatch = data.business_type === 'extension' && data.extension_company &&
@@ -904,7 +979,9 @@ function renderPremiumComparison(items = [], placeholder = '') {
             ${available ? `<div class="comparison-price">${price}</div><div class="comparison-meta">${esc(item.note || 'Includes levies and taxes')}</div>` : `<div class="comparison-meta">${esc(reason)}</div>`}
             ${available ? `<button type="button" onclick="selectComparisonCompany('${item.company}', ${Number(item.total_payable || 0)})">${selected ? 'Selected' : 'Choose'}</button>` : ''}
         </article>`;
-    }).join('');
+    }).join('') + (data.company && items.some(item => item.company === data.company && item.available)
+        ? '<button type="button" class="comparison-show-less" onclick="collapseComparison()">Show less</button>'
+        : '');
 }
 
 function selectComparisonCompany(company, premium) {
@@ -914,7 +991,17 @@ function selectComparisonCompany(company, premium) {
     }
     data.company = company;
     data.selected_premium = premium;
+    comparisonExpanded = false;
     clearError();
+    renderPremiumComparison(premiumComparisonResults);
+}
+
+function expandComparison() {
+    comparisonExpanded = true;
+    renderPremiumComparison(premiumComparisonResults);
+}
+function collapseComparison() {
+    comparisonExpanded = false;
     renderPremiumComparison(premiumComparisonResults);
 }
 
