@@ -1550,8 +1550,8 @@ function pollDmvicStatus(policyNo) {
                 <span style="font-size:12px;">${esc(statusData.error || 'Unknown error — check Renewals for status.')}</span>`;
             return true;
         }
-     
-     
+
+
      if (status === 'pending_manual') {
             box.className = 'dmvic-status-box manual';
             window._dmvicStatusCache = window._dmvicStatusCache || {};
