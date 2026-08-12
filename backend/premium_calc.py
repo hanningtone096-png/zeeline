@@ -504,7 +504,7 @@ MONARCH_TP_FLAT = {
     'motorcycle':        2_000,
     'tuktuk_commercial': 3_000,
     'tuktuk_psv':        3_000,
-    'private':           3_700,
+    'private':           3_245,
     'institutional':     5_000,
     'driving_school':    5_000,
     'agriculture_forestry': 3_000,
@@ -699,6 +699,21 @@ class UnsupportedInsurerProductError(Exception):
             f"{company or 'this insurer'} does not offer {cover.replace('_',' ')} "
             f"cover for {product.replace('_',' ')}."
         )
+MONARCH_TP_INSTALLMENT_OVERRIDE = {
+    ('private', 'inst_2'): 1712,
+}
+
+def apply_installment_override(company, product, certificate, levies, total, breakdown):
+    if company != 'monarch':
+        return levies, total, breakdown
+    override = MONARCH_TP_INSTALLMENT_OVERRIDE.get((product, certificate))
+    if override is None:
+        return levies, total, breakdown
+    net_base = round((override - STAMP_DUTY) / (1 + TOTAL_LEVY_RATE))
+    override_levies = override - net_base
+    if certificate in breakdown:
+        breakdown[certificate] = override
+    return override_levies, override, breakdown        
 
 
 def calculate_premium(cover, product, value, certificate, seats=0, company='',
@@ -821,6 +836,9 @@ def calculate_premium(cover, product, value, certificate, seats=0, company='',
             base, rate_fn = _flat_quote(flat, certificate)
             levies, total = _add_levies(base)
             breakdown = _build_breakdown(rate_fn, certificate, company, product, cover)
+            levies, total, breakdown = apply_installment_override(
+                company, mprod, certificate, levies, total, breakdown
+            )
             return {
                 'base_premium': round(base), 'levies_and_taxes': levies,
                 'total_payable': total, 'period_breakdown': breakdown,
