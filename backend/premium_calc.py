@@ -692,6 +692,11 @@ def _flat_quote(annual_amount, certificate, minimum_floor=500):
     return base, rate_fn
 
 
+MONARCH_TP_INSTALLMENT_OVERRIDE = {
+    ('private', 'inst_2'): 1712,
+}
+
+
 class UnsupportedInsurerProductError(Exception):
     def __init__(self, company, product, cover):
         self.company, self.product, self.cover = company, product, cover
@@ -699,9 +704,7 @@ class UnsupportedInsurerProductError(Exception):
             f"{company or 'this insurer'} does not offer {cover.replace('_',' ')} "
             f"cover for {product.replace('_',' ')}."
         )
-        MONARCH_TP_INSTALLMENT_OVERRIDE = {
-    ('private', 'inst_2'): 1712,
-}
+
 
 def apply_installment_override(company, product, certificate, levies, total, breakdown):
     if company != 'monarch':
