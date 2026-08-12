@@ -45,8 +45,13 @@
         <button onclick="logout()" class="logout-btn">Logout</button>
     </div>
 
+    <!-- ── Mobile quick-jump nav — lets admins skip straight to a section
+         instead of scrolling past everything on a phone screen. Hidden on
+         desktop (see dashboard.css); populated per-role in JS below. ── -->
+    <nav class="quick-jump-nav" id="quickJumpNav" aria-label="Jump to section"></nav>
+
     <!-- Double Insurance Check -->
-    <div class="section-card">
+    <div class="section-card" id="sectionDoubleCheck">
         <h3><i class="fas fa-search" style="color:#2563eb;"></i> Check for Double Insurance</h3>
         <p style="font-size:13px;color:#64748b;margin-top:-6px;">
             Search by vehicle registration or chassis number to see if it already has an active policy,
@@ -76,113 +81,138 @@
     <div id="adminSection" style="display:none;">
 
         <!-- Reports -->
-        <div class="section-card">
-            <h3><i class="fas fa-file-download" style="color:#2563eb;"></i> Reports</h3>
-            <div class="report-bar">
-                <select id="reportPeriod">
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly" selected>Monthly</option>
-                    <option value="yearly">Yearly</option>
-                </select>
-                <button onclick="downloadReport('pdf')">
-                    <i class="fas fa-file-pdf"></i> Download PDF
-                </button>
-                <button onclick="downloadReport('excel')" class="excel">
-                    <i class="fas fa-file-excel"></i> Download Excel
-                </button>
+        <details class="section-card collapsible-section" id="sectionReports" open>
+            <summary>
+                <h3><i class="fas fa-file-download" style="color:#2563eb;"></i> Reports</h3>
+                <i class="fas fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapsible-body">
+                <div class="report-bar">
+                    <select id="reportPeriod">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly" selected>Monthly</option>
+                        <option value="yearly">Yearly</option>
+                    </select>
+                    <button onclick="downloadReport('pdf')">
+                        <i class="fas fa-file-pdf"></i> Download PDF
+                    </button>
+                    <button onclick="downloadReport('excel')" class="excel">
+                        <i class="fas fa-file-excel"></i> Download Excel
+                    </button>
+                </div>
+                <div id="reportSummary" style="margin-top:16px;"></div>
             </div>
-            <div id="reportSummary" style="margin-top:16px;"></div>
-        </div>
+        </details>
 
         <!-- Agent Management -->
-        <div class="section-card">
-            <h3><i class="fas fa-users-cog" style="color:#2563eb;"></i> Agent Management</h3>
-            <div style="overflow-x:auto;">
-                <table class="agent-table" id="agentsTable">
-                    <thead>
-                        <tr>
-                            <th scope="col">Agent</th>
-                            <th scope="col">Email</th>
-                            <th scope="col">Status</th>
-                            <th scope="col">Flag</th>
-                            <th scope="col">Quotes</th>
-                            <th scope="col">Policies</th>
-                            <th scope="col">Premium (KES)</th>
-                            <th scope="col">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="agentsBody">
-                        <tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:20px;">Loading agents…</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="section-card">
-            <h3><i class="fas fa-triangle-exclamation" style="color:#dc2626;"></i> DMVIC Policy Alerts</h3>
-            <p style="font-size:13px;color:#64748b;margin-top:-6px;">
-                Certificates held by DMVIC require a documented logbook check and vehicle inspection before approval.
-            </p>
-            <div id="dmvicConfirmationsBox">
-                <p style="color:#94a3b8;font-size:13px;">Loading DMVIC alerts…</p>
-            </div>
-            <details style="margin-top:14px;">
-                <summary style="cursor:pointer;color:#1d4ed8;font-size:13px;font-weight:600;">Record a policy-alert ID supplied by DMVIC Support</summary>
-                <p style="font-size:12px;color:#64748b;margin:10px 0;">Use this only when Support has supplied an Issuance Request ID after the original issuance attempt.</p>
-                <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;">
-                    <label style="font-size:12px;color:#334155;font-weight:600;">Policy number
-                        <input id="dmvicSupportPolicyNo" type="text" placeholder="POL-..." style="display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
-                    </label>
-                    <label style="font-size:12px;color:#334155;font-weight:600;">Issuance Request ID
-                        <input id="dmvicSupportRequestId" type="text" placeholder="AF-..." style="display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
-                    </label>
-                    <button type="button" onclick="recordDmvicSupportAlert()" style="padding:9px 13px;background:#1d4ed8;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600;">Add to queue</button>
+        <details class="section-card collapsible-section" id="sectionAgents" open>
+            <summary>
+                <h3><i class="fas fa-users-cog" style="color:#2563eb;"></i> Agent Management</h3>
+                <i class="fas fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapsible-body">
+                <div class="table-scroll">
+                    <table class="agent-table responsive-table" id="agentsTable">
+                        <thead>
+                            <tr>
+                                <th scope="col">Agent</th>
+                                <th scope="col">Email</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Flag</th>
+                                <th scope="col">Quotes</th>
+                                <th scope="col">Policies</th>
+                                <th scope="col">Premium (KES)</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="agentsBody">
+                            <tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:20px;">Loading agents…</td></tr>
+                        </tbody>
+                    </table>
                 </div>
-            </details>
-        </div>
+            </div>
+        </details>
+
+        <details class="section-card collapsible-section" id="sectionDmvic" open>
+            <summary>
+                <h3><i class="fas fa-triangle-exclamation" style="color:#dc2626;"></i> DMVIC Policy Alerts</h3>
+                <i class="fas fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapsible-body">
+                <p style="font-size:13px;color:#64748b;margin-top:-6px;">
+                    Certificates held by DMVIC require a documented logbook check and vehicle inspection before approval.
+                </p>
+                <div id="dmvicConfirmationsBox">
+                    <p style="color:#94a3b8;font-size:13px;">Loading DMVIC alerts…</p>
+                </div>
+                <details style="margin-top:14px;">
+                    <summary style="cursor:pointer;color:#1d4ed8;font-size:13px;font-weight:600;">Record a policy-alert ID supplied by DMVIC Support</summary>
+                    <p style="font-size:12px;color:#64748b;margin:10px 0;">Use this only when Support has supplied an Issuance Request ID after the original issuance attempt.</p>
+                    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;">
+                        <label style="font-size:12px;color:#334155;font-weight:600;">Policy number
+                            <input id="dmvicSupportPolicyNo" type="text" placeholder="POL-..." style="display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
+                        </label>
+                        <label style="font-size:12px;color:#334155;font-weight:600;">Issuance Request ID
+                            <input id="dmvicSupportRequestId" type="text" placeholder="AF-..." style="display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
+                        </label>
+                        <button type="button" onclick="recordDmvicSupportAlert()" style="padding:9px 13px;background:#1d4ed8;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600;">Add to queue</button>
+                    </div>
+                </details>
+            </div>
+        </details>
 
         <!-- Certificate Declarations -->
-        <div class="section-card">
-            <h3><i class="fas fa-stamp" style="color:#2563eb;"></i> Certificate Declarations</h3>
-            <p style="font-size:13px;color:#64748b;margin-top:-6px;">
-                DMVIC-issued certificates awaiting declaration to each insurer. Select the
-                certificates for one insurer, paste the M-Pesa confirmation for the
-                declaration payment, then send.
-            </p>
-            <div id="declarationsGroups">
-                <p style="color:#94a3b8;font-size:13px;">Loading pending certificates…</p>
-            </div>
+        <details class="section-card collapsible-section" id="sectionDeclarations" open>
+            <summary>
+                <h3><i class="fas fa-stamp" style="color:#2563eb;"></i> Certificate Declarations</h3>
+                <i class="fas fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapsible-body">
+                <p style="font-size:13px;color:#64748b;margin-top:-6px;">
+                    DMVIC-issued certificates awaiting declaration to each insurer. Select the
+                    certificates for one insurer, paste the M-Pesa confirmation for the
+                    declaration payment, then send.
+                </p>
+                <div id="declarationsGroups">
+                    <p style="color:#94a3b8;font-size:13px;">Loading pending certificates…</p>
+                </div>
 
-            <h4 style="margin-top:22px;font-size:14px;color:#1e293b;">Past Declarations</h4>
-            <div style="overflow-x:auto;">
-                <table class="agent-table" id="declarationsHistoryTable">
-                    <thead>
-                        <tr>
-                            <th scope="col">Sent</th>
-                            <th scope="col">Insurer</th>
-                            <th scope="col">Certs</th>
-                            <th scope="col">Premium (KES)</th>
-                            <th scope="col">Sent To</th>
-                            <th scope="col">Email</th>
-                            <th scope="col">File</th>
-                        </tr>
-                    </thead>
-                    <tbody id="declarationsHistoryBody">
-                        <tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:16px;">Loading…</td></tr>
-                    </tbody>
-                </table>
+                <details class="nested-collapsible" style="margin-top:22px;">
+                    <summary style="cursor:pointer;">
+                        <h4 style="display:inline;font-size:14px;color:#1e293b;">Past Declarations</h4>
+                        <i class="fas fa-chevron-down chevron" style="font-size:11px;"></i>
+                    </summary>
+                    <div class="table-scroll" style="margin-top:10px;">
+                        <table class="agent-table responsive-table" id="declarationsHistoryTable">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Sent</th>
+                                    <th scope="col">Insurer</th>
+                                    <th scope="col">Certs</th>
+                                    <th scope="col">Premium (KES)</th>
+                                    <th scope="col">Sent To</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">File</th>
+                                </tr>
+                            </thead>
+                            <tbody id="declarationsHistoryBody">
+                                <tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:16px;">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
             </div>
-        </div>
+        </details>
 
     </div>
 
     <!-- ── AGENT: My Policies ── -->
     <div id="agentSection" style="display:none;">
-        <div class="section-card">
+        <div class="section-card" id="sectionPolicies">
             <h3><i class="fas fa-shield-alt" style="color:#2563eb;"></i> My Active Policies</h3>
-            <div style="overflow-x:auto;">
-                <table class="agent-table" id="policiesTable">
+            <div class="table-scroll">
+                <table class="agent-table responsive-table" id="policiesTable">
                     <thead>
                         <tr>
                             <th scope="col">Policy No</th>
@@ -204,6 +234,16 @@
 
 </main>
 </div>
+
+<!-- ── Mobile bottom action bar — the 2-3 things people reach for most,
+     one thumb-tap away, so they don't have to hunt for them in the
+     sidebar drawer. Hidden on desktop. ── -->
+<nav class="mobile-action-bar" id="mobileActionBar" aria-label="Quick actions">
+    <a href="/quotation"><i class="fas fa-file-invoice-dollar"></i><span>Quote</span></a>
+    <a href="/clients"><i class="fas fa-users"></i><span>Clients</span></a>
+    <a href="#" id="mabDoubleCheck"><i class="fas fa-search"></i><span>Check</span></a>
+    <a href="/renewals"><i class="fas fa-sync"></i><span>Renewals</span></a>
+</nav>
 
 <!-- DMVIC confirmation modal -->
 <div id="dmvicConfirmModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;align-items:center;justify-content:center;">
@@ -273,6 +313,13 @@ async function loadDashboard() {
         if (d.role === 'admin') {
             renderAdminStats(d);
             document.getElementById('adminSection').style.display = 'block';
+            buildQuickJumpNav([
+                { href: '#sectionDoubleCheck', label: 'Double Check', icon: 'fa-search' },
+                { href: '#sectionReports',     label: 'Reports',      icon: 'fa-file-download' },
+                { href: '#sectionAgents',      label: 'Agents',       icon: 'fa-users-cog' },
+                { href: '#sectionDmvic',       label: 'DMVIC',        icon: 'fa-triangle-exclamation' },
+                { href: '#sectionDeclarations',label: 'Declarations', icon: 'fa-stamp' },
+            ]);
             loadAgents();
             loadReportSummary();
             loadDeclarations();
@@ -280,12 +327,47 @@ async function loadDashboard() {
         } else {
             renderAgentStats(d);
             document.getElementById('agentSection').style.display = 'block';
+            buildQuickJumpNav([
+                { href: '#sectionDoubleCheck', label: 'Double Check', icon: 'fa-search' },
+                { href: '#sectionPolicies',    label: 'My Policies',  icon: 'fa-shield-alt' },
+            ]);
             loadPolicies();
         }
     } catch (err) {
         console.error('Failed to load dashboard:', err);
     }
 }
+
+// ── Mobile quick-jump nav ────────────────────────────────────────────────
+// A row of horizontally-scrollable pills (mobile only, see dashboard.css)
+// that smooth-scroll to a section, so people don't have to blind-scroll
+// past everything to find e.g. Agent Management.
+function buildQuickJumpNav(items) {
+    const nav = document.getElementById('quickJumpNav');
+    if (!nav) return;
+    nav.innerHTML = items.map(item => `
+        <a href="${item.href}" class="quick-jump-pill">
+            <i class="fas ${item.icon}"></i> ${item.label}
+        </a>
+    `).join('');
+    nav.querySelectorAll('a').forEach(a => {
+        a.addEventListener('click', (e) => {
+            e.preventDefault();
+            const target = document.querySelector(a.getAttribute('href'));
+            if (!target) return;
+            // If the target is a collapsible <details>, open it before scrolling.
+            if (target.tagName === 'DETAILS') target.open = true;
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+}
+
+document.getElementById('mabDoubleCheck')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const target = document.getElementById('sectionDoubleCheck');
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('doubleInsuranceQuery')?.focus();
+});
 
 function renderAdminStats(d) {
     const items = [
@@ -354,6 +436,8 @@ function renderChart(labels, values) {
 // Actions are rendered as a "⋮" trigger button + dropdown menu (uses the
 // .actions-cell / .action-trigger-btn / .action-menu-panel classes already
 // defined in dashboard.css) instead of four separate inline buttons per row.
+// Each <td> also carries a data-label so the .responsive-table CSS can turn
+// rows into stacked cards on narrow screens without any JS restructuring.
 async function loadAgents() {
     const tbody = document.getElementById('agentsBody');
     try {
@@ -368,14 +452,14 @@ async function loadAgents() {
 
         tbody.innerHTML = data.agents.map(a => `
             <tr id="arow-${a.id}">
-                <td><strong>${esc(a.full_name)}</strong><br><span style="font-size:12px;color:#64748b;">@${esc(a.username)}</span></td>
-                <td>${esc(a.email || '—')}</td>
-                <td><span id="astatus-${a.id}" class="badge badge-${a.status}">${a.status}</span></td>
-                <td>${renderFlagCell(a)}</td>
-                <td>${a.total_quotes}</td>
-                <td>${a.total_policies}</td>
-                <td>KES ${Number(a.total_premium || 0).toLocaleString()}</td>
-                <td>
+                <td data-label="Agent"><strong>${esc(a.full_name)}</strong><br><span style="font-size:12px;color:#64748b;">@${esc(a.username)}</span></td>
+                <td data-label="Email">${esc(a.email || '—')}</td>
+                <td data-label="Status"><span id="astatus-${a.id}" class="badge badge-${a.status}">${a.status}</span></td>
+                <td data-label="Flag">${renderFlagCell(a)}</td>
+                <td data-label="Quotes">${a.total_quotes}</td>
+                <td data-label="Policies">${a.total_policies}</td>
+                <td data-label="Premium (KES)">KES ${Number(a.total_premium || 0).toLocaleString()}</td>
+                <td data-label="Actions">
                     <div class="actions-cell">
                         <button class="action-trigger-btn" onclick="toggleActionMenu(event, ${a.id})">
                             <i class="fas fa-ellipsis-vertical"></i> Actions
@@ -562,13 +646,13 @@ async function loadPolicies() {
 
             return `
             <tr>
-                <td><span style="font-family:monospace; font-size:12px;">${esc(p.policy_no)}</span></td>
-                <td>${esc((p.first_name||'') + ' ' + (p.last_name||''))}<br><span style="font-size:12px;color:#64748b;">${esc(p.phone||'—')}</span></td>
-                <td>${esc(p.vehicle_reg||'—')}</td>
-                <td>${esc((p.type_of_cover||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))}</td>
-                <td>${p.expiry_date ? new Date(p.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
-                <td class="${expiryClass}">${expiryLabel}</td>
-                <td>KES ${Number(p.total_payable||0).toLocaleString()}</td>
+                <td data-label="Policy No"><span style="font-family:monospace; font-size:12px;">${esc(p.policy_no)}</span></td>
+                <td data-label="Client">${esc((p.first_name||'') + ' ' + (p.last_name||''))}<br><span style="font-size:12px;color:#64748b;">${esc(p.phone||'—')}</span></td>
+                <td data-label="Vehicle">${esc(p.vehicle_reg||'—')}</td>
+                <td data-label="Cover">${esc((p.type_of_cover||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))}</td>
+                <td data-label="Expiry">${p.expiry_date ? new Date(p.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                <td data-label="Days Left" class="${expiryClass}">${expiryLabel}</td>
+                <td data-label="Premium">KES ${Number(p.total_payable||0).toLocaleString()}</td>
             </tr>`;
         }).join('');
     } catch (err) {
@@ -661,16 +745,16 @@ async function checkDoubleInsurance() {
         } else {
             const rows = dmvic.matches.map(match => `
                 <tr>
-                    <td><span style="font-family:monospace;font-size:12px;">${esc(match.InsuranceCertificateNo || '—')}</span></td>
-                    <td>${esc(match.RegistrationNumber || '—')}</td>
-                    <td>${esc(match.ChassisNumber || '—')}</td>
-                    <td>${esc(match.MemberCompanyName || '—')}</td>
-                    <td>${esc(match.CoverEndDate || '—')}</td>
+                    <td data-label="Certificate No"><span style="font-family:monospace;font-size:12px;">${esc(match.InsuranceCertificateNo || '—')}</span></td>
+                    <td data-label="Reg No">${esc(match.RegistrationNumber || '—')}</td>
+                    <td data-label="Chassis">${esc(match.ChassisNumber || '—')}</td>
+                    <td data-label="Insurer">${esc(match.MemberCompanyName || '—')}</td>
+                    <td data-label="Cover End">${esc(match.CoverEndDate || '—')}</td>
                 </tr>`).join('');
             dmvicHtml = `<p style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;">
                 <i class="fas fa-triangle-exclamation"></i> DMVIC shows an existing certificate. A new certificate may be rejected as double insurance until it expires or is cancelled.
             </p>
-            <div style="overflow-x:auto;margin-top:8px;"><table class="agent-table">
+            <div class="table-scroll" style="margin-top:8px;"><table class="agent-table responsive-table">
                 <thead><tr><th>Certificate No</th><th>Reg No</th><th>Chassis</th><th>Insurer</th><th>Cover End</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>`;
@@ -685,9 +769,9 @@ async function checkDoubleInsurance() {
                 const badge = r.is_double_insurance_risk
                     ? '<span class="badge" style="background:#fef2f2;color:#dc2626;">Active</span>'
                     : `<span class="badge" style="background:#f1f5f9;color:#64748b;">${esc(r.status)}</span>`;
-                return `<tr><td><span style="font-family:monospace;font-size:12px;">${esc(r.policy_no)}</span></td><td>${esc(r.vehicle_reg || '—')}</td><td>${esc(r.chassis_number || '—')}</td><td>${esc(r.client_name || '—')}</td><td>${esc((r.type_of_cover || '').replace(/_/g,' '))}</td><td>${r.expiry_date ? new Date(r.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td><td>${badge}</td></tr>`;
+                return `<tr><td data-label="Policy No"><span style="font-family:monospace;font-size:12px;">${esc(r.policy_no)}</span></td><td data-label="Reg No">${esc(r.vehicle_reg || '—')}</td><td data-label="Chassis">${esc(r.chassis_number || '—')}</td><td data-label="Client">${esc(r.client_name || '—')}</td><td data-label="Cover">${esc((r.type_of_cover || '').replace(/_/g,' '))}</td><td data-label="Expiry">${r.expiry_date ? new Date(r.expiry_date).toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td><td data-label="Status">${badge}</td></tr>`;
             }).join('');
-            localHtml = `<p style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-top:18px;margin-bottom:6px;">Our Records</p>${warning}<div style="overflow-x:auto;margin-top:10px;"><table class="agent-table"><thead><tr><th>Policy No</th><th>Reg No</th><th>Chassis</th><th>Client</th><th>Cover</th><th>Expiry</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+            localHtml = `<p style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-top:18px;margin-bottom:6px;">Our Records</p>${warning}<div class="table-scroll" style="margin-top:10px;"><table class="agent-table responsive-table"><thead><tr><th>Policy No</th><th>Reg No</th><th>Chassis</th><th>Client</th><th>Cover</th><th>Expiry</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
         }
 
         box.innerHTML = `<p style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">DMVIC (Live)</p>${dmvicHtml}${localHtml}`;
@@ -713,18 +797,18 @@ async function loadDmvicConfirmations() {
         }
 
         box.innerHTML = `
-            <div style="overflow-x:auto;">
-                <table class="agent-table">
+            <div class="table-scroll">
+                <table class="agent-table responsive-table">
                     <thead><tr><th>Policy</th><th>Vehicle</th><th>Insured</th><th>Agent</th><th>Premium</th><th>Reason</th><th></th></tr></thead>
                     <tbody>${rows.map(row => `
                         <tr>
-                            <td><span style="font-family:monospace;font-size:12px;">${esc(row.policy_no)}</span></td>
-                            <td>${esc(row.vehicle_reg || '—')}<br><span style="font-size:11px;color:#94a3b8;">${esc(row.chassis_number || '')}</span></td>
-                            <td>${esc(row.policy_holder_name || '—')}</td>
-                            <td>${esc(row.agent_name || '—')}</td>
-                            <td>KES ${Number(row.total_payable || 0).toLocaleString()}</td>
-                            <td style="font-size:12px;color:#991b1b;max-width:260px;">${esc(row.dmvic_error || '—')}</td>
-                            <td><button type="button" class="dmvic-review-button" data-policy="${esc(row.policy_no)}" data-reason="${esc(row.dmvic_error || '')}"
+                            <td data-label="Policy"><span style="font-family:monospace;font-size:12px;">${esc(row.policy_no)}</span></td>
+                            <td data-label="Vehicle">${esc(row.vehicle_reg || '—')}<br><span style="font-size:11px;color:#94a3b8;">${esc(row.chassis_number || '')}</span></td>
+                            <td data-label="Insured">${esc(row.policy_holder_name || '—')}</td>
+                            <td data-label="Agent">${esc(row.agent_name || '—')}</td>
+                            <td data-label="Premium">KES ${Number(row.total_payable || 0).toLocaleString()}</td>
+                            <td data-label="Reason" style="font-size:12px;color:#991b1b;max-width:260px;">${esc(row.dmvic_error || '—')}</td>
+                            <td data-label=""><button type="button" class="dmvic-review-button" data-policy="${esc(row.policy_no)}" data-reason="${esc(row.dmvic_error || '')}"
                                 style="padding:6px 14px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Review</button></td>
                         </tr>`).join('')}</tbody>
                 </table>
@@ -847,12 +931,12 @@ async function loadPendingDeclarations() {
             const label = INSURER_LABELS[company] || company;
             const rows = group.certificates.map(c => `
                 <tr>
-                    <td><input type="checkbox" class="decl-cert-cb" data-company="${escAttr(company)}" value="${escAttr(c.policy_no)}" checked></td>
-                    <td><span style="font-family:monospace;font-size:12px;">${esc(c.policy_no)}</span></td>
-                    <td>${esc(c.dmvic_certificate_no || '—')}</td>
-                    <td>${esc(c.policy_holder_name || '—')}</td>
-                    <td>${esc(c.vehicle_reg || '—')}</td>
-                    <td>KES ${Number(c.total_payable || 0).toLocaleString()}</td>
+                    <td data-label="Sel"><input type="checkbox" class="decl-cert-cb" data-company="${escAttr(company)}" value="${escAttr(c.policy_no)}" checked></td>
+                    <td data-label="Policy No"><span style="font-family:monospace;font-size:12px;">${esc(c.policy_no)}</span></td>
+                    <td data-label="Certificate #">${esc(c.dmvic_certificate_no || '—')}</td>
+                    <td data-label="Insured">${esc(c.policy_holder_name || '—')}</td>
+                    <td data-label="Vehicle">${esc(c.vehicle_reg || '—')}</td>
+                    <td data-label="Premium">KES ${Number(c.total_payable || 0).toLocaleString()}</td>
                 </tr>`).join('');
 
             return `
@@ -871,8 +955,8 @@ async function loadPendingDeclarations() {
                         </button>
                     </div>
                 </div>
-                <div style="overflow-x:auto;margin-top:10px;">
-                    <table class="agent-table">
+                <div class="table-scroll" style="margin-top:10px;">
+                    <table class="agent-table responsive-table">
                         <thead><tr><th></th><th>Policy No</th><th>Certificate #</th><th>Insured</th><th>Vehicle</th><th>Premium</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
@@ -972,15 +1056,15 @@ async function loadDeclarationsHistory() {
 
         tbody.innerHTML = rows.map(d => `
             <tr>
-                <td>${d.created_at ? new Date(d.created_at).toLocaleString('en-KE') : '—'}</td>
-                <td>${esc(INSURER_LABELS[d.company] || d.company)}</td>
-                <td>${d.certificate_count}</td>
-                <td>KES ${Number(d.total_premium || 0).toLocaleString()}</td>
-                <td>${esc(d.email_sent_to || '—')}</td>
-                <td>${d.email_sent
+                <td data-label="Sent">${d.created_at ? new Date(d.created_at).toLocaleString('en-KE') : '—'}</td>
+                <td data-label="Insurer">${esc(INSURER_LABELS[d.company] || d.company)}</td>
+                <td data-label="Certs">${d.certificate_count}</td>
+                <td data-label="Premium (KES)">KES ${Number(d.total_premium || 0).toLocaleString()}</td>
+                <td data-label="Sent To">${esc(d.email_sent_to || '—')}</td>
+                <td data-label="Email">${d.email_sent
                     ? '<span class="badge" style="background:#f0fdf4;color:#16a34a;">Sent</span>'
                     : '<span class="badge" style="background:#fef2f2;color:#dc2626;">Not sent</span>'}</td>
-                <td><a href="/api/admin/declarations/${esc(d.id)}/download" style="color:#2563eb;"><i class="fas fa-download"></i> Download</a></td>
+                <td data-label="File"><a href="/api/admin/declarations/${esc(d.id)}/download" style="color:#2563eb;"><i class="fas fa-download"></i> Download</a></td>
             </tr>`).join('');
     } catch (err) {
         console.error('Failed to load declaration history:', err);
