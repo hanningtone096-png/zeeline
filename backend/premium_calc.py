@@ -699,7 +699,7 @@ class UnsupportedInsurerProductError(Exception):
             f"{company or 'this insurer'} does not offer {cover.replace('_',' ')} "
             f"cover for {product.replace('_',' ')}."
         )
-MONARCH_TP_INSTALLMENT_OVERRIDE = {
+        MONARCH_TP_INSTALLMENT_OVERRIDE = {
     ('private', 'inst_2'): 1712,
 }
 
@@ -713,7 +713,7 @@ def apply_installment_override(company, product, certificate, levies, total, bre
     override_levies = override - net_base
     if certificate in breakdown:
         breakdown[certificate] = override
-    return override_levies, override, breakdown        
+    return override_levies, override, breakdown
 
 
 def calculate_premium(cover, product, value, certificate, seats=0, company='',
