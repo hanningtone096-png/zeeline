@@ -757,9 +757,7 @@ function renderProductGrid() {
     });
 
     // Only show products that are actually live for sale. "Coming soon"
-    // tiles (PSV, institutional, agriculture, tuktuk, etc.) are hidden
-    // entirely now instead of shown disabled — nothing useful for an
-    // agent to do with them yet.
+    // tiles are hidden entirely now instead of shown disabled.
     const activeEntries = [...entriesByProduct.entries()]
         .filter(([key]) => ACTIVE_PRODUCT_KEYS.has(key));
 
@@ -769,7 +767,7 @@ function renderProductGrid() {
     }
 
     // Collapse any two active keys that share the exact same display label
-    // into one tile (keeps the first key found; merges company lists).
+    // into one tile (keeps the first key found).
     const byLabel = new Map();
     activeEntries.forEach(([key, info]) => {
         const label = info.label || key;
@@ -791,7 +789,6 @@ function wireProductCards() {
         c.onclick = () => {
             document.querySelectorAll('.product-card').forEach(p => p.classList.remove('selected'));
             c.classList.add('selected');
-            // ... rest of handler unchanged
 
             const subTypeRow = document.getElementById('subTypeRow');
             const tonnageRow = document.getElementById('tonnageRow');
