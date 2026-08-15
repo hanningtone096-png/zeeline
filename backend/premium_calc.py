@@ -172,6 +172,46 @@ def insurer_offers(company, product, cover):
         return False
     return cover in entry['covers']
 
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMERCIAL PRODUCT — virtual "commercial" tile in the quotation UI
+#
+# The three insurers model commercial goods-carrying cover differently:
+# Definite bundles Own Goods / General Cartage / Prime Mover into one product
+# (commercial_hybrid, split by sub_type). Monarch and Directline instead have
+# two separate standalone products (commercial_own_goods, general_cartage)
+# and no Prime Mover option at all. The quotation wizard shows a single
+# "Commercial (Own Goods/Cartage)" tile with a sub-type chip row; this table
+# resolves that virtual (product='commercial', sub_type=...) pair to the real
+# per-insurer product key that actually exists in INSURER_PRODUCTS /
+# calculate_premium. A missing entry means that insurer doesn't offer that
+# sub_type at all (e.g. Monarch/Directline have no Prime Mover product).
+# ─────────────────────────────────────────────────────────────────────────────
+
+COMMERCIAL_VIRTUAL_PRODUCT = 'commercial'
+
+COMMERCIAL_SUBTYPE_TO_REAL_PRODUCT = {
+    'definite':   {'own_goods': 'commercial_hybrid', 'general_cartage': 'commercial_hybrid', 'prime_mover': 'commercial_hybrid'},
+    'monarch':    {'own_goods': 'commercial_own_goods', 'general_cartage': 'general_cartage'},
+    'directline': {'own_goods': 'commercial_own_goods', 'general_cartage': 'general_cartage'},
+}
+
+
+def resolve_commercial_product(company, sub_type):
+    """Resolve the virtual 'commercial' product + sub_type into the real
+    (product, sub_type) pair calculate_premium() understands for this
+    company. Returns (None, None) if this insurer doesn't offer that
+    sub_type at all (e.g. Monarch/Directline + prime_mover)."""
+    company = (company or '').lower()
+    sub_type = (sub_type or '').lower()
+    real_product = COMMERCIAL_SUBTYPE_TO_REAL_PRODUCT.get(company, {}).get(sub_type)
+    if real_product is None:
+        return None, None
+    # Only Definite's combined product still needs sub_type passed through
+    # (its TP rating branches on own_goods/general_cartage/prime_mover).
+    # Monarch/Directline's real product key already encodes the choice.
+    resolved_sub_type = sub_type if real_product == 'commercial_hybrid' else None
+    return real_product, resolved_sub_type
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PSV RATE TABLE (shared by all insurers except Definite's own PSV branch)

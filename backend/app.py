@@ -1985,20 +1985,34 @@ def quotation_premium_comparison():
     except (TypeError, ValueError):
         return jsonify({"error": "Rating inputs must be valid numbers."}), 400
 
+    sub_type = d.get('sub_type') or None
     comparisons = []
     for company in ('directline', 'monarch', 'definite'):
-        if not insurer_offers(company, product, cover):
+        # The wizard's "Commercial (Own Goods/Cartage)" tile is a virtual
+        # product covering three differently-modeled per-insurer catalog
+        # entries — resolve to this company's real product before touching
+        # insurer_offers/calculate_premium, which only know real catalog keys.
+        if product == COMMERCIAL_VIRTUAL_PRODUCT:
+            company_product, company_sub_type = resolve_commercial_product(company, sub_type)
+            if company_product is None:
+                comparisons.append({"company": company, "available": False,
+                                    "reason": "This insurer does not offer this commercial use type."})
+                continue
+        else:
+            company_product, company_sub_type = product, sub_type
+
+        if not insurer_offers(company, company_product, cover):
             comparisons.append({"company": company, "available": False,
                                 "reason": "This insurer does not offer this product and cover."})
             continue
-        if certificate not in available_periods(company, product, cover):
+        if certificate not in available_periods(company, company_product, cover):
             comparisons.append({"company": company, "available": False,
                                 "reason": "This certificate period is not offered for the selected product."})
             continue
         try:
             calculation = calculate_premium(
-                cover, product, value, certificate, seats=seats, company=company,
-                tonnage=tonnage, sub_type=d.get('sub_type') or None, pax=pax,
+                cover, company_product, value, certificate, seats=seats, company=company,
+                tonnage=tonnage, sub_type=company_sub_type, pax=pax,
             )
         except (UnsupportedInsurerProductError, TypeError, ValueError) as exc:
             comparisons.append({"company": company, "available": False, "reason": str(exc)})
@@ -2012,7 +2026,7 @@ def quotation_premium_comparison():
             "note": calculation.get("rate_applied"),
         })
     comparisons.sort(key=lambda item: (not item["available"], item.get("total_payable", float("inf"))))
-    return jsonify({"comparisons": comparisons})
+        return jsonify({"comparisons": comparisons})
 
 
 @app.route('/api/quotations/lookup-by-reg')
@@ -2629,6 +2643,12 @@ def preview_quotation_premium():
 
     if not (cover and product and cert and company):
         return jsonify({"error": "company, product, type_of_cover and type_of_certificate are required"}), 400
+
+    sub_type = d.get('sub_type')
+    if product == COMMERCIAL_VIRTUAL_PRODUCT:
+        product, sub_type = resolve_commercial_product(company, sub_type)
+        if product is None:
+            return jsonify({"error": f"{company.title()} does not offer this commercial use type."}), 400
 
     try:
         value = float(d.get('vehicle_value', 0) or 0)
@@ -3551,6 +3571,20 @@ def generate_quotation():
     company = (d.get('company') or '').lower()
     business_type = (d.get('business_type') or 'new').strip().lower()
     parent_policy_no = (d.get('parent_policy_no') or '').strip().upper() or None
+
+    # Resolve the virtual "commercial" tile to this company's real product
+    # before any installment/cover/DMVIC logic below runs, since all of it
+    # only knows real product keys. d['product']/d['sub_type'] are updated
+    # too, so the extension identity-match check further down, the
+    # calculate_premium() call, and the INSERT INTO quotations all see the
+    # resolved value rather than the virtual one.
+    if product == COMMERCIAL_VIRTUAL_PRODUCT:
+        resolved_product, resolved_sub_type = resolve_commercial_product(company, d.get('sub_type'))
+        if resolved_product is None:
+            return jsonify({"error": f"{(company or 'this insurer').title()} does not offer this commercial use type."}), 400
+        product = resolved_product
+        d['product'] = resolved_product
+        d['sub_type'] = resolved_sub_type
 
     if business_type not in {'new', 'extension'}:
         return jsonify({"error": "Business type must be New Business or Extension."}), 400

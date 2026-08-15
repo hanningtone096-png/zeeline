@@ -549,19 +549,37 @@ const SUBTYPE_GROUPS = {
 // PSV and every other category (institutional, agriculture, motor trade,
 // tuktuk, driving school, special vehicles, motorcycle_psv, etc.) are
 // shown but marked Coming Soon until underwriting is set up for them —
-// Westlake does not offer PSV cover.
 const ACTIVE_PRODUCT_KEYS = new Set([
     'private', 'private_fleet',
-    'commercial_own_goods', 'general_cartage', 'commercial_hybrid',
     'motorcycle',
 ]);
+
+// Client-side mirror of premium_calc.py's resolve_commercial_product().
+const COMMERCIAL_SUBTYPE_TO_REAL_PRODUCT = {
+    definite:   { own_goods: 'commercial_hybrid', general_cartage: 'commercial_hybrid', prime_mover: 'commercial_hybrid' },
+    monarch:    { own_goods: 'commercial_own_goods', general_cartage: 'general_cartage' },
+    directline: { own_goods: 'commercial_own_goods', general_cartage: 'general_cartage' },
+};
+function resolveCommercialProduct(company, subType) {
+    return (COMMERCIAL_SUBTYPE_TO_REAL_PRODUCT[company] || {})[subType] || null;
+}
+// Reverse mapping — used when loading an extension's prior policy, to
+// re-select the virtual "commercial" tile and right sub-type chip from the
+// real product/sub_type stored on that policy's quotation.
+function commercialSubTypeFromReal(realProduct, realSubType) {
+    if (realProduct === 'commercial_hybrid')    return realSubType || null;
+    if (realProduct === 'commercial_own_goods') return 'own_goods';
+    if (realProduct === 'general_cartage')      return 'general_cartage';
+    return null;
+}
+const COMMERCIAL_REAL_PRODUCTS = new Set(['commercial_own_goods', 'general_cartage', 'commercial_hybrid']);
 
 const PAX_BANDED_PRODUCTS = new Set([
     'institutional', 'tour_service', 'private_hire_chauffeur', 'private_hire_self', 'driving_school_heavy'
 ]);
 
 const TONNAGE_PRODUCTS = new Set([
-    'commercial_vehicle', 'commercial_own_goods', 'general_cartage', 'commercial_hybrid'
+    'commercial_vehicle', 'commercial'
 ]);
 
 async function loadInsurerCatalog() {
@@ -718,7 +736,8 @@ async function refreshAvailablePeriods() {
     try {
         const cover = document.getElementById('type_of_cover').value || '';
         const results = await Promise.all(COMPARISON_COMPANIES.map(async company => {
-            const params = new URLSearchParams({ company, product:data.product, cover });
+        const params = new URLSearchParams({ company, product:data.product, cover });
+            if (data.sub_type) params.set('sub_type', data.sub_type);
             const response = await fetch(`/api/insurers/periods?${params.toString()}`);
             return response.ok ? response.json() : { periods: [] };
         }));
@@ -756,25 +775,21 @@ function renderProductGrid() {
         });
     });
 
-    // Only show products that are actually live for sale. "Coming soon"
-    // tiles are hidden entirely now instead of shown disabled.
     const activeEntries = [...entriesByProduct.entries()]
         .filter(([key]) => ACTIVE_PRODUCT_KEYS.has(key));
 
-    if (!activeEntries.length) {
-        grid.innerHTML = '<div class="product-empty">No products configured for this insurer.</div>';
-        return;
-    }
-
-    // Collapse any two active keys that share the exact same display label
-    // into one tile (keeps the first key found).
     const byLabel = new Map();
     activeEntries.forEach(([key, info]) => {
         const label = info.label || key;
         if (!byLabel.has(label)) byLabel.set(label, { key, info });
     });
 
-    let html = '';
+    // "Commercial (Own Goods/Cartage)" is a virtual tile — see
+    // resolveCommercialProduct() above for how it maps to each insurer's
+    // real product when premiums are compared/quoted.
+    let html = `<div class="select-card product-card" data-value="commercial">
+                    <i class="fas fa-truck"></i><br>Commercial (Own Goods/Cartage)</div>`;
+
     byLabel.forEach(({ key, info }) => {
         const icon = info.icon || 'fa-car';
         html += `<div class="select-card product-card" data-value="${key}">
@@ -811,7 +826,7 @@ function wireProductCards() {
                     subTypeRow.style.display = 'block';
                 }
 
-                if (val === 'commercial_hybrid') {
+                if (val === 'commercial') {
                     renderSubTypeChips('commercial_hybrid_type');
                     subTypeRow.style.display = 'block';
                 }
@@ -856,9 +871,14 @@ function renderSubTypeChips(groupKey) {
 function updateCoverOptions() {
     const coverSelect = document.getElementById('type_of_cover');
     const hint = document.getElementById('coverHint');
-    const matchingProducts = Object.entries(INSURER_CATALOG)
-        .map(([company, catalog]) => ({ company, info: (catalog || {})[data.product] }))
-        .filter(entry => entry.info);
+    const matchingProducts = (data.product === 'commercial'
+        ? Object.keys(INSURER_CATALOG).map(company => {
+              const realProduct = data.sub_type ? resolveCommercialProduct(company, data.sub_type) : null;
+              return { company, info: realProduct ? (INSURER_CATALOG[company] || {})[realProduct] : null };
+          })
+        : Object.entries(INSURER_CATALOG)
+              .map(([company, catalog]) => ({ company, info: (catalog || {})[data.product] }))
+    ).filter(entry => entry.info);
 
     coverSelect.querySelectorAll('.cover-option').forEach(opt => {
         opt.classList.remove('disabled-option');
@@ -921,7 +941,7 @@ function comparisonReadiness(payload) {
     if (document.getElementById('paxRow').style.display !== 'none' && payload.pax <= 0) {
         return 'Enter the passenger count to compare premiums.';
     }
-    if (payload.product === 'commercial_hybrid' && !payload.sub_type) {
+    if (payload.product === 'commercial' && !payload.sub_type) {
         return 'Choose the commercial use type to compare premiums.';
     }
     return '';
@@ -1080,10 +1100,22 @@ async function lookupExtension() {
         const q = result.data;
         data.parent_policy_no = q.policy_no;
         selectInsurerForExtension(q.company);
-        selectProductForExtension(q.product);
+
+        // The prior policy's quotation stores the real per-insurer product
+        // (e.g. commercial_own_goods) — map it back to the virtual
+        // "commercial" tile + sub-type chip so Step 1 re-selects correctly.
+        const isCommercial = COMMERCIAL_REAL_PRODUCTS.has(q.product);
+        const cardValue = isCommercial ? 'commercial' : q.product;
+        const chipSubType = isCommercial ? commercialSubTypeFromReal(q.product, q.sub_type) : (q.sub_type || null);
+
+        selectProductForExtension(cardValue);
         data.company = q.company || data.company;
-        data.product = q.product || data.product;
-        data.sub_type = q.sub_type || null;
+        data.product = cardValue || data.product;
+        data.sub_type = isCommercial ? null : chipSubType;
+        if (isCommercial && chipSubType) {
+            const chip = document.querySelector(`#subTypeChips .subtype-chip[data-value="${chipSubType}"]`);
+            if (chip) chip.click();
+        }
         document.getElementById('type_of_cover').value = q.type_of_cover || '';
         document.getElementById('type_of_certificate').value = q.installment_plan || '';
         data.type_of_cover = document.getElementById('type_of_cover').value;
@@ -1140,7 +1172,7 @@ function nextStep() {
         data.expiry_date         = document.getElementById('expiry_date').value;
 
         if (!data.product)             return showError('Please select a product (and use type, where applicable).');
-        if (data.product === 'commercial_hybrid' && !data.sub_type)
+        if (data.product === 'commercial' && !data.sub_type)
             return showError('Please select a Commercial Use Type (Own Goods / General Cartage / Prime Mover).');
         if (!data.type_of_cover)       return showError('Please select a type of cover.');
         if (!data.type_of_certificate) return showError('Please select a certificate type.');
