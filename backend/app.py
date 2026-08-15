@@ -59,7 +59,6 @@ except ImportError:
 
 # Premium calculation (rate tables, insurer product catalog, calculate_premium)
 # now lives in premium_calc.py as pure, unit-testable functions. See that
-# module's docstring for the Directline gross-vs-net levy fix.
 from premium_calc import (
     calculate_premium,
     UnsupportedInsurerProductError,
@@ -68,6 +67,8 @@ from premium_calc import (
     available_periods,
     allowed_installments,
     INSTALLMENT_COUNTS,
+    COMMERCIAL_VIRTUAL_PRODUCT,
+    resolve_commercial_product,
 )
 
 # ── Rate limiting (flask-limiter) ─────────────────────────────────────────────
