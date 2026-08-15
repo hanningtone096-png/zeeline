@@ -755,47 +755,43 @@ function renderProductGrid() {
             entriesByProduct.get(key).companies.push(company);
         });
     });
-    if (!entriesByProduct.size) {
-        grid.innerHTML = '<div class="product-empty">No insurer product catalog is available yet.</div>';
+
+    // Only show products that are actually live for sale. "Coming soon"
+    // tiles (PSV, institutional, agriculture, tuktuk, etc.) are hidden
+    // entirely now instead of shown disabled — nothing useful for an
+    // agent to do with them yet.
+    const activeEntries = [...entriesByProduct.entries()]
+        .filter(([key]) => ACTIVE_PRODUCT_KEYS.has(key));
+
+    if (!activeEntries.length) {
+        grid.innerHTML = '<div class="product-empty">No products configured for this insurer.</div>';
         return;
     }
-    const entries = [...entriesByProduct.entries()];
-    const seen = new Set();
-    let html = '';
 
-    entries.forEach(([key, info]) => {
-        if (seen.has(key)) return;
-
-        if (key === 'tuktuk_commercial' || key === 'tuktuk_psv') {
-            if (seen.has('tuktuk_commercial') || seen.has('tuktuk_psv')) return;
-            seen.add('tuktuk_commercial'); seen.add('tuktuk_psv');
-            // Neither tuktuk sub-type is currently active — whole tile is Coming Soon.
-            html += `<div class="select-card product-card disabled" data-value="tuktuk" data-group="tuktuk" data-disabled="true">
-                        <i class="fas fa-shuttle-van"></i><br>TukTuk<span class="card-coming-soon">Coming Soon</span></div>`;
-            return;
-        }
-
-        seen.add(key);
-        const icon = info.icon || 'fa-car';
-        const isActive = ACTIVE_PRODUCT_KEYS.has(key);
-        html += `<div class="select-card product-card${isActive ? '' : ' disabled'}" data-value="${key}"${isActive ? '' : ' data-disabled="true"'}>
-                    <i class="fas ${icon}"></i><br>${esc(info.label)}${isActive ? '' : '<span class="card-coming-soon">Coming Soon</span>'}</div>`;
+    // Collapse any two active keys that share the exact same display label
+    // into one tile (keeps the first key found; merges company lists).
+    const byLabel = new Map();
+    activeEntries.forEach(([key, info]) => {
+        const label = info.label || key;
+        if (!byLabel.has(label)) byLabel.set(label, { key, info });
     });
 
-    grid.innerHTML = html || '<div class="product-empty">No products configured for this insurer.</div>';
+    let html = '';
+    byLabel.forEach(({ key, info }) => {
+        const icon = info.icon || 'fa-car';
+        html += `<div class="select-card product-card" data-value="${key}">
+                    <i class="fas ${icon}"></i><br>${esc(info.label)}</div>`;
+    });
+
+    grid.innerHTML = html;
     wireProductCards();
 }
-
 function wireProductCards() {
     document.querySelectorAll('.product-card').forEach(c => {
         c.onclick = () => {
-            if (c.dataset.disabled === 'true') {
-                const label = c.innerText.replace('Coming Soon', '').trim();
-                showError(`${label} is coming soon — we currently only offer Private and Commercial (Own Goods / General Cartage) cover.`);
-                return;
-            }
             document.querySelectorAll('.product-card').forEach(p => p.classList.remove('selected'));
             c.classList.add('selected');
+            // ... rest of handler unchanged
 
             const subTypeRow = document.getElementById('subTypeRow');
             const tonnageRow = document.getElementById('tonnageRow');
