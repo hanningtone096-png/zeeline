@@ -2026,7 +2026,7 @@ def quotation_premium_comparison():
             "note": calculation.get("rate_applied"),
         })
     comparisons.sort(key=lambda item: (not item["available"], item.get("total_payable", float("inf"))))
-        return jsonify({"comparisons": comparisons})
+    return jsonify({"comparisons": comparisons})
 
 
 @app.route('/api/quotations/lookup-by-reg')
