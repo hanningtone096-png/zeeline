@@ -388,9 +388,8 @@
         <input id="postal_address" placeholder="e.g. P.O. Box 1234-00100, Nairobi">
     </div>
 </div>
-
 <div class="form-group">
-    <label>KRA Certificate * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span></label>
+    <label id="kraUploadLabel">KRA Certificate * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span></label>
     <div class="upload-area" onclick="document.getElementById('kra_file').click()">
         <i class="fas fa-cloud-upload-alt" style="font-size:24px; color:#94a3b8;"></i>
         <p style="margin:8px 0 0; color:#64748b; font-size:14px;" id="kraFileLabel">Click to upload KRA Certificate</p>
@@ -398,7 +397,7 @@
     </div>
 </div>
 <div class="form-group">
-    <label>National ID Copy * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span></label>
+    <label id="idUploadLabel">National ID Copy * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span></label>
     <div class="upload-area" onclick="document.getElementById('id_file').click()">
         <i class="fas fa-id-card" style="font-size:24px; color:#94a3b8;"></i>
         <p style="margin:8px 0 0; color:#64748b; font-size:14px;" id="idFileLabel">Click to upload National ID</p>
@@ -710,6 +709,15 @@ function setExpiry(start) {
 }
 
 document.getElementById('expiry_date').addEventListener('change', function() { data.expiry_date = this.value; });
+function updateUploadRequirementLabels() {
+    const isExtension = data.business_type === 'extension';
+    document.getElementById('kraUploadLabel').innerHTML = isExtension
+        ? 'KRA Certificate <span style="color:#94a3b8; font-weight:400;">(optional for extensions — already on file, PDF/JPG/PNG)</span>'
+        : 'KRA Certificate * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span>';
+    document.getElementById('idUploadLabel').innerHTML = isExtension
+        ? 'National ID Copy <span style="color:#94a3b8; font-weight:400;">(optional for extensions — already on file, PDF/JPG/PNG)</span>'
+        : 'National ID Copy * <span style="color:#94a3b8; font-weight:400;">(PDF/JPG/PNG)</span>';
+}
 
 document.querySelectorAll('[data-value][id^="bt"]').forEach(card => {
     card.addEventListener('click', () => {
@@ -727,6 +735,7 @@ document.querySelectorAll('[data-value][id^="bt"]').forEach(card => {
         document.getElementById('extLookupMsg').innerText = '';
         applyValidityRules();
         schedulePremiumComparison();
+        updateUploadRequirementLabels();
     });
 });
 
@@ -1215,9 +1224,10 @@ function nextStep() {
         if (!data.email)              return showError('Email address is required.');
         if (!data.id_number)          return showError('ID / Passport number is required.');
         if (!data.postal_address)     return showError('Postal address is required.');
-        if (!document.getElementById('kra_file').files[0]) return showError('Please upload your KRA Certificate.');
-        if (!document.getElementById('id_file').files[0])  return showError('Please upload your National ID copy.');
-    }
+        if (data.business_type !== 'extension') {
+            if (!document.getElementById('kra_file').files[0]) return showError('Please upload your KRA Certificate.');
+            if (!document.getElementById('id_file').files[0])  return showError('Please upload your National ID copy.');
+        }
 
     currentStep++;
     showStep();
@@ -1800,6 +1810,7 @@ function esc(s) {
 async function logout() { await fetch('/api/logout'); location.href = '/login'; }
 
 loadInsurerCatalog();
+updateUploadRequirementLabels();
 showStep();
 </script>
 <script>
