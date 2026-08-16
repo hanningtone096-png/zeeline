@@ -1563,10 +1563,17 @@ function pollDmvicStatus(policyNo) {
             return true;
         }
 
-        if (status === 'issued') {
+     if (status === 'issued') {
             box.className = 'dmvic-status-box issued';
+            const dlBtn = statusData.certificate_available
+                ? `<br><a href="/api/policies/${encodeURIComponent(statusData.policy_no)}/certificate/download"
+                     style="display:inline-block;margin-top:8px;background:#2563eb;color:#fff;
+                            padding:7px 14px;border-radius:6px;font-size:12px;font-weight:700;
+                            text-decoration:none;">
+                     <i class="fas fa-download"></i> Download Certificate Copy</a>`
+                : '';
             box.innerHTML = `<i class="fas fa-certificate"></i> <strong>DMVIC Certificate Issued</strong><br>
-                <span style="font-family:monospace;">${esc(statusData.certificate_no || '')}</span>`;
+                <span style="font-family:monospace;">${esc(statusData.certificate_no || '')}</span>${dlBtn}`;
             return true; // stop polling
         }
         if (status === 'failed') {

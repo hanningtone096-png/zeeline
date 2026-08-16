@@ -351,6 +351,12 @@ def query(sql, params=(), fetchone=False, commit=False):
 # ─────────────────────────────────────────────────────────────────────────────
 
 COMPANY_EMAIL = os.environ.get('COMPANY_EMAIL', 'westlakeagencyltd@gmail.com')
+CERTIFICATE_MANAGER_EMAIL = os.environ.get('CERTIFICATE_MANAGER_EMAIL', '').strip()
+CERTIFICATES_FOLDER = os.path.join(os.path.dirname(__file__), 'certificates')
+os.makedirs(CERTIFICATES_FOLDER, exist_ok=True)
+
+if IS_PRODUCTION and not CERTIFICATE_MANAGER_EMAIL:
+    log.warning("CERTIFICATE_MANAGER_EMAIL not set — issued-certificate copies will not be emailed.")
 SMTP_EMAIL    = os.environ.get('SMTP_EMAIL', '')
 SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')
 SMTP_HOST     = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
@@ -1730,6 +1736,34 @@ def issue_dmvic_certificate(policy_no, quote_row):
                result.get('api_request_number'), policy_no), commit=True)
         log.info("DMVIC certificate issued for %s: %s",
                   policy_no, result.get('certificate_no'))
+
+        # ── Manager copy: generate a confirmation-record PDF, save it, and
+        # email it to CERTIFICATE_MANAGER_EMAIL. Best-effort — must never
+        # break certificate issuance itself if PDF/email fails.
+        try:
+            pdf_bytes = generate_certificate_record_pdf(policy_no, quote_row, result)
+            if pdf_bytes:
+                fname = f"Certificate_{policy_no}.pdf"
+                fpath = os.path.join(CERTIFICATES_FOLDER, fname)
+                with open(fpath, 'wb') as f:
+                    f.write(pdf_bytes)
+                if CERTIFICATE_MANAGER_EMAIL:
+                    send_email(
+                        CERTIFICATE_MANAGER_EMAIL,
+                        f"Certificate Issued — {policy_no} ({result.get('certificate_no')})",
+                        f"""<h2>DMVIC Certificate Issued</h2>
+                            <p><b>Policy:</b> {policy_no}<br>
+                               <b>Certificate No:</b> {result.get('certificate_no')}<br>
+                               <b>Insured:</b> {quote_row.get('policy_holder_name','')}<br>
+                               <b>Vehicle:</b> {quote_row.get('vehicle_reg','')}<br>
+                               <b>Insurer:</b> {(quote_row.get('company') or '').title()}</p>
+                            <p>Confirmation record attached.</p>""",
+                        attachments=[(fname, pdf_bytes)],
+                    )
+                else:
+                    log.warning("CERTIFICATE_MANAGER_EMAIL not set — copy for %s not emailed.", policy_no)
+        except Exception as e:
+            log.error("Certificate copy generation/email failed for %s: %s", policy_no, type(e).__name__)
     else:
         # DMVIC Support confirmed on 2026-07-25 that policy alerts are produced
         # by its record comparison and that this account has no manual policy
@@ -2259,6 +2293,64 @@ def generate_quote_pdf(data, quote_id, agent, logo_path=LOGO_PATH):
     story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph(f"Date Printed: {date.today().strftime('%d/%m/%Y')}", small_style))
 
+    doc.build(story)
+    return buf.getvalue()
+
+
+def generate_certificate_record_pdf(policy_no, quote_row, dmvic_result):
+    """Westlake's own confirmation record for a DMVIC-issued certificate.
+    NOTE: this is NOT the DMVIC certificate file itself — DMVIC's Intermediary
+    issuance response doesn't return one, and no print/download endpoint is
+    wired up yet. This is an internal confirmation copy for the manager's
+    records. Swap in the real DMVIC file here once that endpoint is confirmed.
+    """
+    if not PDF_AVAILABLE:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=1.5 * cm, leftMargin=1.5 * cm,
+                             topMargin=1.5 * cm, bottomMargin=1.5 * cm)
+    navy = colors.HexColor('#1d4ed8')
+    dark = colors.HexColor('#1e293b')
+    title_style = ParagraphStyle('t', fontSize=15, textColor=navy, fontName='Helvetica-Bold')
+    warn_style  = ParagraphStyle('w', fontSize=8.5, textColor=colors.HexColor('#92400e'), leading=11)
+    label_style = ParagraphStyle('l', fontSize=8, textColor=dark, fontName='Helvetica-Bold')
+    val_style   = ParagraphStyle('v', fontSize=9, textColor=dark)
+
+    story = [
+        Paragraph("CERTIFICATE ISSUANCE RECORD", title_style),
+        Spacer(1, 4),
+        Paragraph("This is Westlake Insurance Agency's internal confirmation record of a "
+                  "DMVIC certificate issuance. It is not the DMVIC-issued windscreen certificate.",
+                  warn_style),
+        Spacer(1, 12),
+    ]
+
+    def row(label, value):
+        return [Paragraph(label, label_style), Paragraph(str(value or '—'), val_style)]
+
+    rows = [
+        row("Certificate No.", dmvic_result.get('certificate_no')),
+        row("Transaction No.", dmvic_result.get('transaction_no')),
+        row("API Request No.", dmvic_result.get('api_request_number')),
+        row("Policy No.", policy_no),
+        row("Insurer", (quote_row.get('company') or '').title()),
+        row("Policy Holder", quote_row.get('policy_holder_name')),
+        row("KRA PIN", quote_row.get('kra_pin')),
+        row("Vehicle Reg.", quote_row.get('vehicle_reg')),
+        row("Chassis No.", quote_row.get('chassis_number')),
+        row("Cover Type", (quote_row.get('type_of_cover') or '').replace('_', ' ').title()),
+        row("Period", f"{quote_row.get('commencing_date','')} to {quote_row.get('expiry_date','')}"),
+        row("Issued At", datetime.now().strftime('%d/%m/%Y %H:%M')),
+    ]
+    t = Table(rows, colWidths=[4 * cm, 13 * cm])
+    t.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#334155')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#cbd5e1')),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t)
     doc.build(story)
     return buf.getvalue()
 
@@ -3916,6 +4008,10 @@ def policy_dmvic_status(policy_no):
     if session['role'] != 'admin' and row['agent_id'] != session['user_id']:
         return jsonify({"error": "You do not have access to this policy"}), 403
 
+    certificate_available = os.path.exists(
+        os.path.join(CERTIFICATES_FOLDER, f"Certificate_{policy_no}.pdf")
+    )
+
     return jsonify({
         "policy_no":       row.get('policy_no'),
         "policy_status":   row.get('status'),
@@ -3925,7 +4021,21 @@ def policy_dmvic_status(policy_no):
         "issuance_request_id": row.get('dmvic_issuance_request_id'),
         "error":           row.get('dmvic_error'),
         "can_confirm":     bool(row.get('dmvic_status') == 'pending_manual' and row.get('dmvic_issuance_request_id')),
+        "certificate_available": certificate_available,
     })
+
+@app.route('/api/policies/<policy_no>/certificate/download')
+@login_required
+def download_policy_certificate(policy_no):
+    row = query("SELECT policy_no, agent_id FROM policies WHERE policy_no=%s", (policy_no,), fetchone=True)
+    if not row:
+        return jsonify({"error": "Policy not found"}), 404
+    if session['role'] != 'admin' and row.get('agent_id') != session['user_id']:
+        return jsonify({"error": "You do not have access to this policy"}), 403
+    fpath = os.path.join(CERTIFICATES_FOLDER, f"Certificate_{policy_no}.pdf")
+    if not os.path.exists(fpath):
+        return jsonify({"error": "No certificate copy available for this policy yet."}), 404
+    return send_file(fpath, as_attachment=True, download_name=f"Certificate_{policy_no}.pdf")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POLICIES
