@@ -1224,10 +1224,11 @@ function nextStep() {
         if (!data.email)              return showError('Email address is required.');
         if (!data.id_number)          return showError('ID / Passport number is required.');
         if (!data.postal_address)     return showError('Postal address is required.');
-        if (data.business_type !== 'extension') {
+       if (data.business_type !== 'extension') {
             if (!document.getElementById('kra_file').files[0]) return showError('Please upload your KRA Certificate.');
             if (!document.getElementById('id_file').files[0])  return showError('Please upload your National ID copy.');
         }
+    }
 
     currentStep++;
     showStep();
