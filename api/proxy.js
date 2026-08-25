@@ -24,10 +24,13 @@ function upstreamPath(request) {
   // The `path` parameter selects a backend route under /api/. Sanitize it so a
   // caller cannot escape the /api/ prefix (e.g. `?path=../admin`) or inject an
   // extra query string (e.g. `?path=foo?bar=baz`): strip leading slashes, drop
-  // any `..` segment, and forbid a literal '?' by taking only the first token.
+  // any `..` segment, and forbid a literal '?' by stripping anything from the
+  // first '?' or '#' onward. Multi-segment paths (dashboard/stats,
+  // admin/dmvic/pending-confirmations, …) MUST be preserved in full.
   const rawPath = (incoming.searchParams.get('path') || '');
   incoming.searchParams.delete('path');
-  const cleanSegments = rawPath.split(/[/?#]/)[0]
+  const pathOnly = rawPath.split(/[?#]/)[0];
+  const cleanSegments = pathOnly
     .split('/')
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s !== '.' && s !== '..');

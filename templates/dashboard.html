@@ -304,7 +304,19 @@ function withCsrf(headers = {}) {
 async function loadDashboard() {
     try {
         const res = await fetch('/api/dashboard/stats');
-        if (!res.ok) { window.location.href = '/login'; return; }
+        // Only bounce to /login on a genuine auth rejection (401/403). Any
+        // other non-OK status (500/502/503/404) means the session is probably
+        // still valid and redirecting to /login would just bounce back here,
+        // causing an infinite reload loop. Surface a retry link instead.
+        if (res.status === 401 || res.status === 403) { window.location.href = '/login'; return; }
+        if (!res.ok) {
+            console.error('Dashboard stats request failed:', res.status);
+            const el = document.getElementById('welcome');
+            if (el) el.insertAdjacentHTML('afterend',
+                '<p style="color:#b91c1c;padding:8px 0">Could not load dashboard data. ' +
+                '<a href="javascript:location.reload()">Retry</a></p>');
+            return;
+        }
         const d = await res.json();
 
         document.getElementById('welcome').innerText  = d.name || 'User';
