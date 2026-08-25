@@ -21,8 +21,17 @@ function requestBody(request) {
 
 function upstreamPath(request) {
   const incoming = new URL(request.url, 'https://proxy.invalid');
-  const path = incoming.searchParams.get('path') || '';
+  // The `path` parameter selects a backend route under /api/. Sanitize it so a
+  // caller cannot escape the /api/ prefix (e.g. `?path=../admin`) or inject an
+  // extra query string (e.g. `?path=foo?bar=baz`): strip leading slashes, drop
+  // any `..` segment, and forbid a literal '?' by taking only the first token.
+  const rawPath = (incoming.searchParams.get('path') || '');
   incoming.searchParams.delete('path');
+  const cleanSegments = rawPath.split(/[/?#]/)[0]
+    .split('/')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s !== '.' && s !== '..');
+  const path = cleanSegments.join('/');
   const query = incoming.searchParams.toString();
   return `/api/${path}${query ? `?${query}` : ''}`;
 }
@@ -32,15 +41,30 @@ module.exports = async (request, response) => {
   for (const [name, value] of Object.entries(request.headers)) {
     const normalizedName = name.toLowerCase();
     if (value === undefined || HOP_BY_HOP_HEADERS.has(normalizedName) || normalizedName === 'host') continue;
+    // Do not forward client-supplied forwarding headers — they are spoofable.
+    // The proxy sets the authoritative values below from its own origin/client.
+    if (normalizedName === 'x-forwarded-for' || normalizedName === 'x-forwarded-host'
+        || normalizedName === 'x-forwarded-proto' || normalizedName === 'x-real-ip'
+        || normalizedName === 'x-zeeline-public-host') {
+      continue;
+    }
     headers.set(name, Array.isArray(value) ? value.join(', ') : value);
   }
 
-  // Flask-WTF checks the HTTPS referrer against request.host. The API's Nginx
-  // proxy restores this trusted public host before forwarding to Flask.
-  const publicHost = request.headers.host || 'zeelineinsurance.tech';
-  headers.set('x-zeeline-public-host', publicHost);
-  headers.set('x-forwarded-host', publicHost);
-  headers.set('x-forwarded-proto', 'https');
+  // Set trusted forwarding headers ourselves rather than trusting the client.
+  // The public host is the backend origin's own host (not the attacker-controlled
+  // request Host), so any backend CSRF referrer check validates against the real
+  // public host. The client IP comes from the connection socket so it cannot be
+  // spoofed via a header; client-supplied x-forwarded-for is dropped above.
+  const backendUrl = new URL(BACKEND_ORIGIN);
+  headers.set('x-zeeline-public-host', backendUrl.host);
+  headers.set('x-forwarded-host', backendUrl.host);
+  headers.set('x-forwarded-proto', backendUrl.protocol.replace(':', ''));
+  const clientIp = (request.socket && request.socket.remoteAddress) || '';
+  if (clientIp) {
+    headers.set('x-forwarded-for', clientIp);
+    headers.set('x-real-ip', clientIp);
+  }
 
   try {
     const upstream = await fetch(`${BACKEND_ORIGIN}${upstreamPath(request)}`, {

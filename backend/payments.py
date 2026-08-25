@@ -263,6 +263,52 @@ def activate_paid_policy_and_enqueue_dmvic(policy_no, *, source, reference, user
     return True
 
 
+def _policy_fully_paid(policy_no):
+    """Return True when the sum of completed payments for `policy_no` covers
+    its total_payable. Used to gate policy activation so that a single partial
+    M-Pesa payment cannot activate a policy that has not been fully settled."""
+    policy = _query("SELECT total_payable FROM policies WHERE policy_no=%s",
+                    (policy_no,), fetchone=True)
+    if not policy:
+        return False
+    quoted = round(float(policy.get('total_payable') or 0), 2)
+    if quoted <= 0:
+        return False
+    paid_row = _query("""SELECT COALESCE(SUM(amount),0) AS paid
+                         FROM payments
+                         WHERE policy_no=%s AND status='completed'""",
+                      (policy_no,), fetchone=True) or {}
+    paid = round(float(paid_row.get('paid', 0) or 0), 2)
+    return paid >= quoted
+
+
+def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None):
+    """Mark the M-Pesa payment for `ref` completed, then activate the policy
+    only once it is fully paid.
+
+    A single (possibly partial) successful payment must NOT activate a policy.
+    Partial payments accumulate (each as its own completed `payments` row) and
+    the policy is activated only when the quoted premium is covered. Returns
+    True if the policy transitioned to active on this call, False otherwise.
+    """
+    # `reference` (the ArchPay checkout request id) is unique per STK push, so
+    # this touches exactly one row. Policy activation below is itself idempotent
+    # (activate_policy_after_payment only transitions pending_payment->active
+    # once), so a duplicate settlement call is a no-op rather than double-issue.
+    _query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
+           (ref,), commit=True)
+
+    if not _policy_fully_paid(policy_no):
+        log.info("Payment %s settled but policy %s is not fully paid; not activating.",
+                 ref, policy_no)
+        _query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
+               (source + '_partial', f"policy={policy_no} ref={reference}"), commit=True)
+        return False
+    return activate_paid_policy_and_enqueue_dmvic(
+        policy_no, source=source, reference=reference, user_id=user_id,
+    )
+
+
 @payments_bp.route('/quotations/buy', methods=['POST'])
 @login_required
 @approved_required
@@ -421,12 +467,19 @@ def mpesa_stk():
     if not result['success']:
         return jsonify({"error": result.get('error', 'STK push failed')}), 400
 
-    existing = _query("SELECT id FROM payments WHERE policy_no=%s AND method='mpesa'",
-                       (policy_no,), fetchone=True)
-    if existing:
-        _query("""UPDATE payments SET amount=%s, reference=%s, status='pending', paid_at=NULL
-                 WHERE policy_no=%s AND method='mpesa'""",
-               (amount, result['checkout_request_id'], policy_no), commit=True)
+    # Record this STK push. A previously *completed* M-Pesa payment (e.g. a
+    # partial installment that already settled) must be preserved so completed
+    # amounts accumulate toward the balance; only an in-flight *pending* row
+    # is replaced (the previous prompt was abandoned). Otherwise insert a new
+    # row. This keeps the one-pending-row-per-policy invariant for
+    # reconciliation without losing completed partial payments.
+    pending = _query("""SELECT id FROM payments
+                       WHERE policy_no=%s AND method='mpesa' AND status='pending'""",
+                     (policy_no,), fetchone=True)
+    if pending:
+        _query("""UPDATE payments SET amount=%s, reference=%s, paid_at=NULL
+                 WHERE id=%s""",
+               (amount, result['checkout_request_id'], pending['id']), commit=True)
     else:
         _query("INSERT INTO payments (policy_no, amount, status, method, reference) VALUES (%s,%s,'pending','mpesa',%s)",
                (policy_no, amount, result['checkout_request_id']), commit=True)
@@ -440,6 +493,7 @@ def mpesa_stk():
 
 @payments_bp.route('/mpesa/query', methods=['POST'])
 @login_required
+@approved_required
 def mpesa_query():
     d                   = request.get_json() or {}
     checkout_request_id = d.get('checkout_request_id', '').strip()
@@ -461,12 +515,11 @@ def mpesa_query():
 
     result = mpesa_query_status(checkout_request_id)
     if result.get('success') and policy_no:
-        _query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
-               (checkout_request_id,), commit=True)
-        activate_paid_policy_and_enqueue_dmvic(
-            policy_no,
+        receipt = result.get('mpesa_receipt_number') or checkout_request_id
+        _settle_mpesa_payment(
+            checkout_request_id, policy_no,
             source='mpesa_payment_confirmed',
-            reference=checkout_request_id,
+            reference=receipt,
             user_id=session.get('user_id'),
         )
     return jsonify(result)
@@ -485,8 +538,6 @@ def mpesa_callback(secret):
                or callback_data.get('checkout_request_id')
                or callback_data.get('CheckoutRequestID')
                or '').strip()
-        status = (callback_data.get('status') or '').strip().lower()
-        receipt = callback_data.get('mpesaReceiptNumber')
         if not ref:
             return jsonify({"received": False, "error": "Missing checkoutRequestId"}), 400
 
@@ -495,22 +546,32 @@ def mpesa_callback(secret):
             log.warning("ArchPay callback ignored: unknown checkoutRequestId=%s", ref)
             return jsonify({"received": True})
 
-        terminal_failures = ('cancelled', 'canceled', 'timeout', 'reversed')
-        if status in ('completed', 'success', 'successful', 'paid') or (receipt and status not in terminal_failures):
-            mpesa_ref = receipt or ref
-            _query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
-                   (ref,), commit=True)
-            activate_paid_policy_and_enqueue_dmvic(
-                pmt['policy_no'],
+        # SECURITY: do NOT trust the callback payload's status/receipt. The
+        # only thing the path secret proves is that the caller knew the URL.
+        # Re-confirm with ArchPay's own authenticated /verify endpoint (gated
+        # by our private API key) before marking anything paid, so a forged
+        # callback can never activate a policy on its own. If the verify API
+        # has not yet reflected the settlement, leave the payment pending;
+        # the client's /mpesa/query polling (which also re-verifies) will
+        # complete the settlement once ArchPay confirms.
+        verify = mpesa_query_status(ref)
+        status = (verify.get('status') or '').strip().lower()
+
+        if verify.get('success'):
+            receipt = verify.get('mpesa_receipt_number') or ref
+            _settle_mpesa_payment(
+                ref, pmt['policy_no'],
                 source='archpay_callback_confirmed',
-                reference=mpesa_ref,
+                reference=receipt,
             )
-        elif status in ('failed', 'cancelled', 'timeout'):
-            _query("UPDATE payments SET status=%s WHERE reference=%s", (status, ref), commit=True)
+        elif status in ('failed', 'cancelled', 'canceled', 'timeout', 'reversed'):
+            _query("UPDATE payments SET status=%s WHERE reference=%s AND status='pending'",
+                   (status, ref), commit=True)
             _query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
-                   ('archpay_callback_not_completed', f"policy={pmt['policy_no']} ref={ref} status={status}"), commit=True)
+                   ('archpay_callback_not_completed',
+                    f"policy={pmt['policy_no']} ref={ref} status={status}"), commit=True)
         else:
-            log.info("ArchPay callback received non-final status=%s ref=%s", status, ref)
+            log.info("ArchPay callback non-final status=%s ref=%s (left pending)", status, ref)
     except Exception as e:
         log.error("ArchPay callback processing error: %s", type(e).__name__)
     return jsonify({"received": True})

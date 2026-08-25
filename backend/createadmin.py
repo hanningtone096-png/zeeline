@@ -1,5 +1,6 @@
 import os
 import sys
+import getpass
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -45,8 +46,10 @@ def create_user():
     full_name = input("Full Name        : ").strip()
     username = input("Username         : ").strip()
     email = input("Email            : ").strip()
-    password = input("Password         : ")
-    confirm = input("Confirm Password : ")
+    # Use getpass so the password is never echoed to the terminal or captured
+    # in shell history / scrollback.
+    password = getpass.getpass("Password         : ")
+    confirm = getpass.getpass("Confirm Password : ")
 
     if not full_name or not username or not password:
         print("\nERROR: Full Name, Username and Password are required.")

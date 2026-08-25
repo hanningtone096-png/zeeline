@@ -1,4 +1,5 @@
 import os, io, uuid, logging, smtplib, json, base64, time, threading, queue, hashlib, functools, random, ipaddress, re
+from html import escape as html_escape
 import requests
 from ai_assistant import assistant_bp, init_assistant
 from reportlab.lib.pagesizes import A4
@@ -1932,13 +1933,19 @@ def verify_otp(user_id, submitted_code, purpose):
         return False, "Too many incorrect attempts. Please request a new code."
 
     import hmac
-    if not hmac.compare_digest(str(row['code']), submitted_code.strip()):
+    if not hmac.compare_digest(str(row['code']), str(submitted_code or '').strip()):
         query("UPDATE verification_codes SET attempts=attempts+1 WHERE id=%s",
               (row['id'],), commit=True)
         remaining = OTP_MAX_ATTEMPTS - (row['attempts'] + 1)
         return False, f"Incorrect code. {max(remaining,0)} attempt(s) remaining."
 
-    query("UPDATE verification_codes SET used=1 WHERE id=%s", (row['id'],), commit=True)
+    # Atomically claim the code: only the first concurrent caller gets a
+    # modified count of 1, so a single-use code can't be redeemed twice even
+    # under a race (e.g. two password-reset submissions with the same code).
+    claimed = query("UPDATE verification_codes SET used=1 WHERE id=%s AND used=0",
+                    (row['id'],), commit=True)
+    if not claimed:
+        return False, "This code has already been used. Please request a new one."
     return True, "Code verified."
 
 
@@ -2787,6 +2794,18 @@ def list_pending_declarations():
     return jsonify({"pending": summary})
 
 
+def _xlsx_text_safe(value):
+    """Neutralize Excel formula injection. If a string cell's first character
+    is one Excel treats as the start of a formula (=, +, -, @, tab, CR), prefix
+    it with a space so Excel renders the value as text rather than evaluating
+    it. Non-strings (numbers/dates) and empty values pass through unchanged."""
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return ' ' + value
+    return value
+
+
 def build_declaration_excel(company, rows, mpesa_message):
     if not EXCEL_AVAILABLE:
         return None
@@ -2802,38 +2821,38 @@ def build_declaration_excel(company, rows, mpesa_message):
     r = 2
     for row in rows:
         cert_type_label = row.get('dmvic_cert_type') or ''
-        ws.cell(r, 1,  row.get('dmvic_certificate_no') or '')
-        ws.cell(r, 2,  row.get('dmvic_transaction_no') or '')
-        ws.cell(r, 3,  cert_type_label)
+        ws.cell(r, 1,  _xlsx_text_safe(row.get('dmvic_certificate_no') or ''))
+        ws.cell(r, 2,  _xlsx_text_safe(row.get('dmvic_transaction_no') or ''))
+        ws.cell(r, 3,  _xlsx_text_safe(cert_type_label))
         ws.cell(r, 4,  company_label)
         ws.cell(r, 5,  INTERMEDIARY_NAME)
-        ws.cell(r, 6,  row.get('agent_name') or '')
-        ws.cell(r, 7,  row.get('policy_holder_name') or '')
+        ws.cell(r, 6,  _xlsx_text_safe(row.get('agent_name') or ''))
+        ws.cell(r, 7,  _xlsx_text_safe(row.get('policy_holder_name') or ''))
         ws.cell(r, 8,  row['dmvic_issued_at'].strftime('%d/%m/%Y') if row.get('dmvic_issued_at') else '')
-        ws.cell(r, 9,  row.get('policy_no') or '')
-        ws.cell(r, 10, row.get('vehicle_reg') or '')
-        ws.cell(r, 11, row.get('chassis_number') or '')
+        ws.cell(r, 9,  _xlsx_text_safe(row.get('policy_no') or ''))
+        ws.cell(r, 10, _xlsx_text_safe(row.get('vehicle_reg') or ''))
+        ws.cell(r, 11, _xlsx_text_safe(row.get('chassis_number') or ''))
         ws.cell(r, 12, row['commencing_date'].strftime('%d/%m/%Y') if row.get('commencing_date') else '')
         ws.cell(r, 13, row['expiry_date'].strftime('%d/%m/%Y') if row.get('expiry_date') else '')
-        ws.cell(r, 14, row.get('make') or '')
-        ws.cell(r, 15, row.get('vehicle_model') or '')  # NOTE: not currently stored — see caveat below
-        ws.cell(r, 16, row.get('vehicle_body_type') or '')
-        ws.cell(r, 17, row.get('year_of_manufacture') or '')
-        ws.cell(r, 18, row.get('engine_number') or '')
-        ws.cell(r, 19, row.get('kra_pin') or '')
+        ws.cell(r, 14, _xlsx_text_safe(row.get('make') or ''))
+        ws.cell(r, 15, _xlsx_text_safe(row.get('vehicle_model') or ''))  # NOTE: not currently stored — see caveat below
+        ws.cell(r, 16, _xlsx_text_safe(row.get('vehicle_body_type') or ''))
+        ws.cell(r, 17, _xlsx_text_safe(row.get('year_of_manufacture') or ''))
+        ws.cell(r, 18, _xlsx_text_safe(row.get('engine_number') or ''))
+        ws.cell(r, 19, _xlsx_text_safe(row.get('kra_pin') or ''))
         ws.cell(r, 20, float(row.get('vehicle_value') or 0))
-        ws.cell(r, 21, row.get('email') or '')
-        ws.cell(r, 22, row.get('phone') or '')
+        ws.cell(r, 21, _xlsx_text_safe(row.get('email') or ''))
+        ws.cell(r, 22, _xlsx_text_safe(row.get('phone') or ''))
         ws.cell(r, 23, 'Active')
         ws.cell(r, 24, float(row.get('total_payable') or 0))
-        ws.cell(r, 25, COVER_TYPE_LABELS.get(row.get('type_of_cover'), row.get('type_of_cover') or ''))
+        ws.cell(r, 25, _xlsx_text_safe(COVER_TYPE_LABELS.get(row.get('type_of_cover'), row.get('type_of_cover') or '')))
         r += 1
 
     total_row = r + 1
     ws.cell(total_row, 24, f"=SUM(X2:X{r-1})")
 
     msg_row = total_row + 2
-    ws.cell(msg_row, 15, mpesa_message)
+    ws.cell(msg_row, 15, _xlsx_text_safe(mpesa_message))
 
     widths = [16,14,30,33,26,14,23,18,23,16,21,14,12,14,15,14,11,15,17,13,33,18,10,10,10]
     for i, w in enumerate(widths, 1):
@@ -2864,6 +2883,13 @@ def send_declaration():
     if not rows:
         return jsonify({"error": "None of the selected certificates are pending declaration for this insurer."}), 400
 
+    # Mark only the certificates that were actually validated against the
+    # pending-for-this-insurer list (and included in the emailed sheet) as
+    # declared. Using the raw request `policy_nos` here would let an admin
+    # re-declare already-declared policies or policies belonging to another
+    # insurer, diverging the DB from what was sent to the insurer.
+    declared_policy_nos = [r['policy_no'] for r in rows]
+
     excel_bytes = build_declaration_excel(company, rows, mpesa_message)
     if excel_bytes is None:
         return jsonify({"error": "Excel generation unavailable — install openpyxl"}), 503
@@ -2890,6 +2916,8 @@ def send_declaration():
     except Exception as e:
         return safe_error_response(e, "Could not record this declaration.")
 
+    # Escape admin-supplied text before interpolating into the HTML email so a
+    # compromised admin session can't inject markup/JS into the insurer's inbox.
     sent = send_email(
         recipient,
         f"Certificate Declaration — {INSURER_FULL_NAMES.get(company, company.title())} — {date.today()}",
@@ -2897,13 +2925,13 @@ def send_declaration():
             <p>Please find attached {len(rows)} certificate(s) declared by Westlake
                Insurance Agency, totalling KES {total_premium:,.0f}.</p>
             <h3>M-Pesa Payment Confirmation</h3>
-            <p style="font-family:monospace;">{mpesa_message}</p>""",
+            <p style="font-family:monospace;">{html_escape(mpesa_message)}</p>""",
         attachments=[(file_name, excel_bytes)],
     )
 
     query("""UPDATE policies SET declared_at=NOW(), declaration_id=%s
-             WHERE policy_no IN (%s)""" % ('%s', ','.join(['%s'] * len(policy_nos))),
-          (decl_id, *policy_nos), commit=True)
+             WHERE policy_no IN (%s)""" % ('%s', ','.join(['%s'] * len(declared_policy_nos))),
+          (decl_id, *declared_policy_nos), commit=True)
 
     if sent:
         query("UPDATE declarations SET email_sent=1 WHERE id=%s", (decl_id,), commit=True)
@@ -2929,10 +2957,16 @@ def send_declaration():
 @admin_required
 def download_declaration(declaration_id):
     row = query("SELECT * FROM declarations WHERE id=%s", (declaration_id,), fetchone=True)
-    if not row or not os.path.exists(row['file_path']):
+    if not row or not row.get('file_path') or not os.path.exists(row['file_path']):
         abort(404)
-    return send_file(row['file_path'], as_attachment=True,
-                      download_name=os.path.basename(row['file_path']))
+    # Containment check: only serve files that actually live under the
+    # declarations folder, in case a stored file_path was ever pointed elsewhere.
+    safe_dir = os.path.realpath(DECLARATIONS_FOLDER)
+    real_path = os.path.realpath(row['file_path'])
+    if os.path.commonpath([safe_dir, real_path]) != safe_dir:
+        abort(404)
+    return send_file(real_path, as_attachment=True,
+                      download_name=os.path.basename(real_path))
 
 
 @app.route('/api/admin/declarations/history')
@@ -3408,10 +3442,19 @@ def update_agent_status(agent_id):
     status = d.get('status')
     if status not in ('approved', 'rejected', 'suspended'):
         return jsonify({"error": "Invalid status"}), 400
-    query("UPDATE users SET status=%s WHERE id=%s", (status, agent_id), commit=True)
+    # Only agent accounts are manageable here. Scoping the UPDATE to
+    # role='agent' prevents an admin from suspending/rejecting another admin
+    # (or themselves) through an endpoint meant for agent approval.
+    target = query("SELECT role FROM users WHERE id=%s", (agent_id,), fetchone=True)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+    if target['role'] != 'agent':
+        return jsonify({"error": "This endpoint only manages agent accounts."}), 400
+    query("UPDATE users SET status=%s WHERE id=%s AND role='agent'", (status, agent_id), commit=True)
     query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
           (session['user_id'], 'agent_status_change',
            f"agent_id={agent_id} status={status}"), commit=True)
+    _cache_delete_prefix("cache:dashboard")
     return jsonify({"success": True})
 
 
@@ -4237,6 +4280,18 @@ def submit_claim():
     if not all(str(d.get(k, '')).strip() for k in required):
         return jsonify({"error": "All fields are required"}), 400
 
+    claim_policy = d['claim_policy'].strip().upper()
+
+    # Authorization: the claimed-against policy must exist and belong to this
+    # agent (admins may claim against any policy). Without this any logged-in
+    # agent could file claims against other agents' policies or non-existent
+    # policy numbers, polluting claim reports and downstream fraud flows.
+    if session.get('role') != 'admin':
+        owned = query("SELECT policy_no FROM policies WHERE policy_no=%s AND agent_id=%s",
+                      (claim_policy, session['user_id']), fetchone=True)
+        if not owned:
+            return jsonify({"error": "You can only file claims against your own policies."}), 403
+
     try:
         existing = query("""
             SELECT id
@@ -4245,7 +4300,7 @@ def submit_claim():
             AND incident_date=%s
             AND agent_id=%s
         """, (
-            d['claim_policy'],
+            claim_policy,
             d['incident_date'],
             session['user_id']
         ), fetchone=True)
@@ -4290,7 +4345,7 @@ def submit_claim():
         """, (
             claim_id,
             session['user_id'],
-            d['claim_policy'].strip().upper(),
+            claim_policy,
             d['incident_date'],
             d['incident_type'],
             d['incident_desc'].strip(),
@@ -4403,16 +4458,35 @@ def renew_policy():
     if session['role'] != 'admin' and p['agent_id'] != session['user_id']:
         return jsonify({"error": "You do not have access to this policy"}), 403
 
+    # Only an active policy is renewable — a cancelled, lapsed or
+    # pending-payment policy must not be flipped back to active here, and a
+    # policy cannot be renewed repeatedly to push its term arbitrarily far out.
+    if p.get('status') != 'active':
+        return jsonify({"error": "Only active policies can be renewed."}), 400
+
     old_expiry = p['expiry_date']
     if isinstance(old_expiry, str):
         old_expiry = datetime.strptime(old_expiry, '%Y-%m-%d').date()
-    new_expiry = old_expiry.replace(year=old_expiry.year + 1)
+    # Feb 29 commencement in a leap year has no equivalent day in a non-leap
+    # year; fall back to Feb 28 instead of raising an unhandled ValueError.
+    try:
+        new_expiry = old_expiry.replace(year=old_expiry.year + 1)
+    except ValueError:
+        new_expiry = old_expiry.replace(year=old_expiry.year + 1, day=28)
 
     query("""
         UPDATE policies
         SET expiry_date=%s, status='active', updated_at=NOW()
         WHERE id=%s
     """, (str(new_expiry), pid), commit=True)
+
+    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+          (session['user_id'], 'policy_renewed',
+           f"policy_id={pid} policy_no={p.get('policy_no')} "
+           f"old_expiry={old_expiry} new_expiry={new_expiry}"), commit=True)
+
+    _cache_delete_prefix("cache:dashboard")
+    _cache_delete_prefix("cache:reports_summary")
 
     return jsonify({"success": True, "new_expiry": str(new_expiry)})
 

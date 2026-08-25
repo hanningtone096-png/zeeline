@@ -1,8 +1,11 @@
 import re
+import logging
 from datetime import date, datetime
 
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from werkzeug.security import generate_password_hash
+
+log = logging.getLogger(__name__)
 
 
 AUTO_ID_TABLES = {
@@ -152,8 +155,13 @@ class MongoStore:
         self.db_name = db_name
         self.client = None
         self.db = None
-        self.admin_email = admin_email or "admin@westlakeinsurance.co.ke"
-        self.admin_password = admin_password or "Admin@2024"
+        # SECURITY: there is NO hardcoded default admin password. A bootstrap
+        # admin is only created when the operator explicitly provides both
+        # ADMIN_EMAIL and ADMIN_PASSWORD via the environment; otherwise the
+        # system refuses to seed a known-credential account. (The previous
+        # fallback of "Admin@2024" was a backdoor baked into source control.)
+        self.admin_email = admin_email or None
+        self.admin_password = admin_password or None
         self._ready = False
 
     def _ensure_ready(self):
@@ -214,6 +222,16 @@ class MongoStore:
 
     def _ensure_default_admin(self):
         if self.db.users.find_one({"role": "admin"}):
+            return
+        # Only seed a bootstrap admin when the operator explicitly configured
+        # both credentials. Never auto-create an admin with a known/hardcoded
+        # password — that would let anyone who reads this source log in as admin.
+        if not self.admin_email or not self.admin_password:
+            log.error(
+                "No admin user exists and ADMIN_EMAIL/ADMIN_PASSWORD are not set. "
+                "Skipping bootstrap admin creation. Create one via createadmin.py "
+                "(or set ADMIN_EMAIL and ADMIN_PASSWORD) before deploying."
+            )
             return
         self._insert_doc("users", {
             "full_name": "System Administrator",
