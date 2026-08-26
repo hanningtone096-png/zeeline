@@ -5,6 +5,18 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+  --brand-orange: #ea580c;       /* unified brand orange (replaces #ef4102 / #de5d0d) */
+  --brand-orange-dark: #c2410c;
+  --brand-orange-light: #f97316;
+  --brand-orange-soft: #fff7ed;  /* tint for hover/focus surfaces */
+  --brand-blue: #2563eb;
+  --brand-blue-dark: #1d4ed8;
+  --navy: #0f172a;
+  --navy-2: #1e293b;
+  --slate-bg: #f1f5f9;
+}
+
 body {
     font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
     background: #f1f5f9;
@@ -62,6 +74,8 @@ body {
 }
 
 .nav-links li a {
+    position: relative;
+    overflow: hidden;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -76,9 +90,22 @@ body {
     white-space: nowrap;
 }
 
+.nav-links li a::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 50%;
+    transform: translateY(-50%);
+    width: 3px; height: 0;
+    background: var(--brand-orange);
+    border-radius: 0 3px 3px 0;
+    transition: height .2s ease;
+}
+
 .nav-links li a:hover  { background: #1e293b; color: #f1f5f9; }
-.nav-links li.active a { background: #1e40af; color: #fff; }
-.nav-links li a i      { width: 18px; text-align: center; font-size: 14px; flex-shrink: 0; }
+.nav-links li.active a { background: #1e293b; color: #fff; }
+.nav-links li.active a::before { height: 60%; }
+.nav-links li.active a i      { color: var(--brand-orange); }
+.nav-links li a i             { width: 18px; text-align: center; font-size: 14px; flex-shrink: 0; }
 
 /* ── Main content ──────────────────────────────────────────── */
 
@@ -104,7 +131,7 @@ body {
 .top-header h2 {
     font-size: 20px;
     font-weight: 700;
-    color: #de5d0d;
+    color: var(--brand-orange);
 }
 
 .logout-btn {
@@ -133,7 +160,7 @@ body {
 
 button {
     padding: 9px 18px;
-    background: #000000;
+    background: var(--brand-blue);
     color: #fff;
     border: none;
     border-radius: 8px;
@@ -148,8 +175,18 @@ button {
     touch-action: manipulation;
 }
 
-button:hover    { background: #1d4ed8; }
+button:hover    { background: var(--brand-blue-dark); }
 button:disabled { opacity: .6; cursor: not-allowed; }
+
+/* The one primary action per screen — brand orange */
+.btn-primary {
+    background: linear-gradient(135deg, var(--brand-orange), var(--brand-orange-dark));
+    box-shadow: 0 4px 12px rgba(234, 88, 12, .28);
+}
+.btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--brand-orange-light), var(--brand-orange));
+    box-shadow: 0 6px 16px rgba(234, 88, 12, .38);
+}
 
 /* ── Cards grid ────────────────────────────────────────────── */
 

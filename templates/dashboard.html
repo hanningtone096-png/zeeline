@@ -61,7 +61,7 @@
             <input type="text" id="doubleInsuranceQuery" placeholder="e.g. KAA 123A or chassis number"
                    style="flex:1; min-width:220px; padding:10px 14px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px;"
                    onkeydown="if(event.key==='Enter') checkDoubleInsurance();">
-            <button onclick="checkDoubleInsurance()" style="padding:10px 20px; background:#2563eb; color:#fff; border:none; border-radius:8px; cursor:pointer; font-weight:600;">
+            <button class="btn-primary" onclick="checkDoubleInsurance()" style="padding:10px 20px; border:none; border-radius:8px; cursor:pointer; font-weight:600;">
                 <i class="fas fa-search"></i> Check
             </button>
         </div>
@@ -264,7 +264,7 @@
         <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
             <button type="button" onclick="closeDmvicConfirmModal()" style="padding:10px 18px;background:#f1f5f9;border:none;border-radius:6px;cursor:pointer;">Cancel</button>
             <button type="button" onclick="submitDmvicConfirmation(false)" style="padding:10px 18px;background:#f1f5f9;color:#dc2626;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Reject</button>
-            <button type="button" onclick="submitDmvicConfirmation(true)" style="padding:10px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+            <button type="button" class="btn-primary" onclick="submitDmvicConfirmation(true)" style="padding:10px 18px;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
                 <i class="fas fa-check"></i> Approve and issue
             </button>
         </div>
@@ -284,7 +284,7 @@
             style="width:100%;margin-top:6px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;box-sizing:border-box;"></textarea>
         <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
             <button onclick="closeDeclarationModal()" style="padding:10px 18px;background:#f1f5f9;border:none;border-radius:8px;cursor:pointer;">Cancel</button>
-            <button onclick="confirmSendDeclaration()" style="padding:10px 18px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">
+            <button class="btn-primary" onclick="confirmSendDeclaration()" style="padding:10px 18px;border:none;border-radius:8px;cursor:pointer;font-weight:600;">
                 <i class="fas fa-paper-plane"></i> Send
             </button>
         </div>
