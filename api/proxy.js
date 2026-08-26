@@ -54,16 +54,23 @@ module.exports = async (request, response) => {
     headers.set(name, Array.isArray(value) ? value.join(', ') : value);
   }
 
-  // Set trusted forwarding headers ourselves rather than trusting the client.
-  // The public host is the backend origin's own host (not the attacker-controlled
-  // request Host), so any backend CSRF referrer check validates against the real
-  // public host. The client IP comes from the connection socket so it cannot be
-  // spoofed via a header; client-supplied x-forwarded-for is dropped above.
-  const backendUrl = new URL(BACKEND_ORIGIN);
-  headers.set('x-zeeline-public-host', backendUrl.host);
-  headers.set('x-forwarded-host', backendUrl.host);
-  headers.set('x-forwarded-proto', backendUrl.protocol.replace(':', ''));
+  // Flask-WTF's CSRF referrer check (WTF_CSRF_SSL_STRICT) compares
+  // request.referrer against https://{request.host}/. The backend's Nginx
+  // restores request.host from x-forwarded-host, so this header MUST carry the
+  // public host the browser actually used (zeelineinsurance.tech) — NOT the
+  // backend origin (api.zeelineinsurance.tech). Setting the backend origin
+  // here made request.host = api... so the browser's Referer (zeeline...)
+  // never matched and every CSRF-protected POST (login, etc.) returned 400.
+  //
+  // Using the incoming request Host is safe: a victim's browser always sends
+  // Host = the legitimate site it is talking to, so a cross-site attacker
+  // cannot influence this value for the victim's request. Client-supplied
+  // x-forwarded-* headers were dropped above, so this is the only source.
   const clientIp = (request.socket && request.socket.remoteAddress) || '';
+  const publicHost = request.headers.host || 'zeelineinsurance.tech';
+  headers.set('x-zeeline-public-host', publicHost);
+  headers.set('x-forwarded-host', publicHost);
+  headers.set('x-forwarded-proto', 'https');
   if (clientIp) {
     headers.set('x-forwarded-for', clientIp);
     headers.set('x-real-ip', clientIp);
