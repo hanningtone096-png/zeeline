@@ -20,6 +20,7 @@
         <i class="fas fa-bars"></i>
     </button>
     <span class="brand">WESTLAKE</span>
+    <button class="notif-bell" type="button" aria-label="Notifications"><i class="fas fa-bell"></i><span class="notif-badge">0</span></button>
     <button class="logout-btn" onclick="logout()" aria-label="Logout" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
         <i class="fas fa-sign-out-alt"></i>
     </button>
@@ -39,6 +40,7 @@
         <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
         <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
         <li><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li><a href="/commissions"><i class="fas fa-percentage"></i> Commissions</a></li>
         <li><a href="/privacy"><i class="fas fa-shield-alt"></i> privacy policy</a></li>
         <li><a href="/terms"><i class="fas fa-gavel"></i> terms and conditions</a></li>
     </ul>
@@ -48,7 +50,10 @@
 
     <div class="top-header">
         <h2>Welcome, <span id="welcome">—</span> <span id="roleTag" style="font-size:12px; background:#eff6ff; color:#2563eb; padding:3px 10px; border-radius:99px; font-weight:600; vertical-align:middle;"></span></h2>
-        <button onclick="logout()" class="logout-btn">Logout</button>
+        <div style="display:flex;align-items:center;gap:10px;">
+            {% include '_notifications.html' %}
+            <button onclick="logout()" class="logout-btn">Logout</button>
+        </div>
     </div>
 
     <!-- ── Mobile quick-jump nav — lets admins skip straight to a section
@@ -397,7 +402,7 @@ function renderAdminStats(d) {
         { icon:'fas fa-user-tie',      color:'#8b5cf6', bg:'#f5f3ff', label:'Agents',           value: d.total_agents,    ...trendOf(d,'agents_delta')    },
         { icon:'fas fa-file-invoice',  color:'#10b981', bg:'#f0fdf4', label:'Quotations',        value: d.total_quotes,    ...trendOf(d,'quotes_delta')    },
         { icon:'fas fa-shield-alt',    color:'#f59e0b', bg:'#fffbeb', label:'Active Policies',   value: d.active_policies, ...trendOf(d,'policies_delta')  },
-        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:'Total Premium',     value: 'KES ' + Number(d.total_premium).toLocaleString(), ...trendOf(d,'premium_delta') },
+        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:"Today's Premium",   value: 'KES ' + Number(d.total_premium).toLocaleString(), ...trendOf(d,'premium_delta') },
     ];
     renderStatCards(items);
     renderChart(
