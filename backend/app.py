@@ -3114,6 +3114,23 @@ def favicon():
         max_age=60 * 60 * 24 * 30,
     )
 
+@app.route('/manifest.webmanifest')
+def webmanifest():
+    return send_file(
+        os.path.join(BASE_DIR, '..', 'manifest.webmanifest'),
+        mimetype='application/manifest+json',
+        max_age=60 * 60 * 24 * 30,
+    )
+
+@app.route('/sw.js')
+def service_worker():
+    # Service-Worker-Allowed lets /sw.js control scope '/' (the whole app),
+    # not just the directory the script lives in.
+    resp = send_file(os.path.join(BASE_DIR, '..', 'sw.js'),
+                     mimetype='application/javascript; charset=utf-8')
+    resp.headers['Service-Worker-Allowed'] = '/'
+    return resp
+
 @app.route('/login')
 def login_page():
     if 'user_id' in session:
