@@ -1430,7 +1430,7 @@ def dmvic_vehicle_identity(quote_row):
     return identity, missing
 
 
-def issue_dmvic_certificate(policy_no, quote_row):
+def _issue_dmvic_certificate_impl(policy_no, quote_row):
     """
     Attempts DMVIC certificate issuance for a paid policy. Called after the
     payment settlement transition on a background worker so the agent isn't
@@ -1817,6 +1817,59 @@ def issue_dmvic_certificate(policy_no, quote_row):
                       WHERE policy_no=%s""",
                   (result.get('error', 'Unknown DMVIC error'), policy_no), commit=True)
             log.warning("DMVIC issuance failed for %s: %s", policy_no, result.get('error'))
+
+
+# DMVIC statuses that mean "this policy needs human attention" and therefore
+# warrant a bell notification + admin email. 'issued' is success, 'pending' is
+# in-flight, 'unsupported' is an expected not-wired-up state — none of those
+# alert. This set is consulted by the wrapper below so every terminal branch
+# inside _issue_dmvic_certificate_impl is covered without instrumenting each one.
+_DMVIC_ALERT_STATUSES = ('pending_manual', 'failed')
+
+
+def _notify_dmvic_outcome(policy_no):
+    """Read the final dmvic_status off the policy row and, if it's an
+    attention-required state, push a notification (admin emailed + owning
+    agent). Called from the issue_dmvic_certificate wrapper on the way out,
+    so it captures every hold/failure path without each branch needing its
+    own push_notification call. Best-effort — never raises."""
+    try:
+        row = query("""SELECT dmvic_status, dmvic_error, agent_id
+                       FROM policies WHERE policy_no=%s""",
+                    (policy_no,), fetchone=True)
+        if not row:
+            return
+        status = (row.get('dmvic_status') or '').lower()
+        if status not in _DMVIC_ALERT_STATUSES:
+            return
+        error = (row.get('dmvic_error') or 'DMVIC requires attention').strip()
+        # Keep the notification message short; the full reason lives on the row.
+        short = error if len(error) <= 180 else error[:177] + '...'
+        label = 'DMVIC policy alert' if status == 'pending_manual' else 'DMVIC issuance failed'
+        push_notification(
+            'dmvic_flag',
+            f"{label}: {policy_no}",
+            short,
+            link='/renewals',
+            user_id=row.get('agent_id'),
+            email_admin=True,
+        )
+    except Exception as e:
+        log.error("_notify_dmvic_outcome failed for %s: %s", policy_no, type(e).__name__)
+
+
+def issue_dmvic_certificate(policy_no, quote_row):
+    """Public entry point — runs the issuance implementation, then emits a
+    notification for any attention-required outcome. The try/finally ensures
+    the notification fires even when the impl raises before reaching a
+    terminal UPDATE (in which case dmvic_status stays unset and the notifier
+    quietly does nothing)."""
+    try:
+        _issue_dmvic_certificate_impl(policy_no, quote_row)
+    finally:
+        _notify_dmvic_outcome(policy_no)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MONARCH POLICY NUMBER SEQUENCES
 #
