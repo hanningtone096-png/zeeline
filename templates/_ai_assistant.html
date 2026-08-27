@@ -12,7 +12,22 @@
     cursor: pointer;
     box-shadow: 0 4px 14px rgba(0,0,0,.25);
     z-index: 9999; border: 2px solid #2563eb;
-    padding: 0; overflow: hidden;
+    padding: 0; overflow: visible;
+    transition: box-shadow .2s ease;
+}
+/* Proactive "nudge" state — a soft brand-orange glow ring that pulses.
+   Trigger/clear from anywhere via window.wlAiPulse(true|false). At rest the
+   bubble is unchanged, so it stays unobtrusive until there's a reason. */
+#wlAiBubble.pulse {
+    animation: wlAiPulse 2s ease-out infinite;
+}
+@keyframes wlAiPulse {
+    0%   { box-shadow: 0 4px 14px rgba(0,0,0,.25), 0 0 0 0 rgba(234,88,12,.55); }
+    70%  { box-shadow: 0 4px 14px rgba(0,0,0,.25), 0 0 0 14px rgba(234,88,12,0); }
+    100% { box-shadow: 0 4px 14px rgba(0,0,0,.25), 0 0 0 0 rgba(234,88,12,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    #wlAiBubble.pulse { animation: none; box-shadow: 0 4px 14px rgba(0,0,0,.25), 0 0 0 4px rgba(234,88,12,.5); }
 }
 #wlAiPanel {
     display: none; flex-direction: column;
@@ -82,7 +97,18 @@
 
     window.wlAiToggle = function () {
         const panel = document.getElementById('wlAiPanel');
-        panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+        const opening = panel.style.display !== 'flex';
+        panel.style.display = opening ? 'flex' : 'none';
+        // Opening acknowledges the nudge — stop the pulse.
+        if (opening) window.wlAiPulse(false);
+    };
+
+    // Turn the proactive bubble glow on/off. Other scripts (e.g. the DMVIC
+    // alerts loader) call window.wlAiPulse(true) when the assistant has a
+    // heads-up to surface, and wlAiToggle clears it on open.
+    window.wlAiPulse = function (on) {
+        const b = document.getElementById('wlAiBubble');
+        if (b) b.classList.toggle('pulse', !!on);
     };
 
     window.wlAiFileSelected = function () {

@@ -15,10 +15,18 @@
   --navy: #0f172a;
   --navy-2: #1e293b;
   --slate-bg: #f1f5f9;
+
+  /* Type scale */
+  --font-sans: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  --fs-display: 28px;   /* KPI headline numbers */
+  --fs-title: 15px;     /* section titles */
+  --fs-body: 14px;     /* table text */
+  --fs-label: 12px;    /* eyebrow / table headers */
 }
 
 body {
-    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
     background: #f1f5f9;
     color: #1e293b;
     font-size: 14px;
@@ -807,4 +815,139 @@ input, select, textarea {
     .mobile-action-bar { display: flex; }
     /* Leave room so the bottom bar never covers content */
     .main-content { padding-bottom: 82px !important; }
+}
+
+/* ============================================================
+   §3  KPI STAT CARD — trend indicator
+   ============================================================ */
+.stat-card .value {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+.stat-card .trend {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    margin-top: 2px;
+}
+.stat-card .trend.up   { color: #16a34a; }
+.stat-card .trend.down { color: #dc2626; }
+.stat-card .trend i { font-size: 10px; }
+
+/* ============================================================
+   §5  EMPTY + LOADING STATES
+   ============================================================ */
+/* Friendly empty state — used inside a <td colspan> wrapper or a plain box */
+.empty-state {
+    text-align: center;
+    padding: 34px 20px;
+    color: #64748b;
+}
+.empty-state > i {
+    font-size: 30px;
+    color: #cbd5e1;
+    margin-bottom: 10px;
+    display: block;
+}
+.empty-state h4 {
+    font-size: var(--fs-title);
+    color: #475569;
+    margin: 0 0 4px;
+    font-weight: 600;
+}
+.empty-state p {
+    font-size: 13px;
+    margin: 0;
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Skeleton shimmer — drop into any container while data fetches */
+.skeleton {
+    background: #e2e8f0;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    height: 12px;
+}
+.skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .65), transparent);
+    animation: skel-shimmer 1.4s infinite;
+}
+@keyframes skel-shimmer { 100% { transform: translateX(100%); } }
+.skeleton-cell { padding: 10px 12px; }
+
+/* ============================================================
+   §6  MICRO-INTERACTIONS
+   ============================================================ */
+/* Smooth table-row hover with brand-orange left accent */
+.agent-table tbody tr td,
+.client-table tbody tr td { transition: background .15s ease, box-shadow .15s ease; }
+.agent-table tbody tr:hover td,
+.client-table tbody tr:hover td { background: #f8fafc; }
+.agent-table tbody tr:hover td:first-child,
+.client-table tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--brand-orange); }
+
+/* Smooth open animation for collapsible <details> panels.
+   Close uses the native instant hide; open slides/fades in. The chevron
+   rotation is already transitioned in the existing .chevron rule. */
+.collapsible-section[open] .collapsible-body {
+    animation: details-open .24s ease;
+}
+@keyframes details-open {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* Toast notifications — replaces inline alert() for action feedback */
+#toast-container {
+    position: fixed;
+    top: 20px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+    width: max-content;
+    max-width: 92vw;
+}
+.toast {
+    pointer-events: auto;
+    background: #0f172a;
+    color: #fff;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 240px;
+    border-left: 4px solid var(--brand-blue);
+    animation: toast-in .25s ease;
+}
+.toast.success { border-left-color: #16a34a; }
+.toast.error   { border-left-color: #dc2626; }
+.toast.info    { border-left-color: var(--brand-orange); }
+.toast.leaving { animation: toast-out .25s ease forwards; }
+.toast i { font-size: 15px; }
+.toast.success i { color: #4ade80; }
+.toast.error i   { color: #f87171; }
+.toast.info i    { color: #fb923c; }
+@keyframes toast-in  { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+@keyframes toast-out { to   { opacity: 0; transform: translateY(-12px); } }
+
+/* Keep toasts clear of the mobile top bar */
+@media (max-width: 900px) {
+    #toast-container { top: 64px; }
 }

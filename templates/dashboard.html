@@ -7,6 +7,9 @@
 <title>WESTLAKE INSURANCE - Dashboard</title>
 <link rel="stylesheet" href="/css/dashboard.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -127,7 +130,7 @@
                             </tr>
                         </thead>
                         <tbody id="agentsBody">
-                            <tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:20px;">Loading agents…</td></tr>
+                            <tr><td colspan="8">Loading…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -225,7 +228,7 @@
                         </tr>
                     </thead>
                     <tbody id="policiesBody">
-                        <tr><td colspan="7" style="text-align:center; color:#94a3b8; padding:20px;">Loading policies…</td></tr>
+                        <tr><td colspan="7">Loading…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -383,11 +386,11 @@ document.getElementById('mabDoubleCheck')?.addEventListener('click', (e) => {
 
 function renderAdminStats(d) {
     const items = [
-        { icon:'fas fa-users',         color:'#3b82f6', bg:'#eff6ff', label:'Total Clients',   value: d.total_clients   },
-        { icon:'fas fa-user-tie',      color:'#8b5cf6', bg:'#f5f3ff', label:'Agents',           value: d.total_agents    },
-        { icon:'fas fa-file-invoice',  color:'#10b981', bg:'#f0fdf4', label:'Quotations',        value: d.total_quotes    },
-        { icon:'fas fa-shield-alt',    color:'#f59e0b', bg:'#fffbeb', label:'Active Policies',   value: d.active_policies },
-        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:'Total Premium',     value: 'KES ' + Number(d.total_premium).toLocaleString() },
+        { icon:'fas fa-users',         color:'#3b82f6', bg:'#eff6ff', label:'Total Clients',   value: d.total_clients,   ...trendOf(d,'clients_delta')   },
+        { icon:'fas fa-user-tie',      color:'#8b5cf6', bg:'#f5f3ff', label:'Agents',           value: d.total_agents,    ...trendOf(d,'agents_delta')    },
+        { icon:'fas fa-file-invoice',  color:'#10b981', bg:'#f0fdf4', label:'Quotations',        value: d.total_quotes,    ...trendOf(d,'quotes_delta')    },
+        { icon:'fas fa-shield-alt',    color:'#f59e0b', bg:'#fffbeb', label:'Active Policies',   value: d.active_policies, ...trendOf(d,'policies_delta')  },
+        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:'Total Premium',     value: 'KES ' + Number(d.total_premium).toLocaleString(), ...trendOf(d,'premium_delta') },
     ];
     renderStatCards(items);
     renderChart(
@@ -398,10 +401,10 @@ function renderAdminStats(d) {
 
 function renderAgentStats(d) {
     const items = [
-        { icon:'fas fa-users',        color:'#3b82f6', bg:'#eff6ff', label:'My Clients',  value: d.my_clients  },
-        { icon:'fas fa-file-invoice', color:'#10b981', bg:'#f0fdf4', label:'Quotations',   value: d.my_quotes   },
-        { icon:'fas fa-shield-alt',   color:'#f59e0b', bg:'#fffbeb', label:'Active Policies', value: d.my_active },
-        { icon:'fas fa-coins',        color:'#8b5cf6', bg:'#f5f3ff', label:'My Premium',   value: 'KES ' + Number(d.my_premium).toLocaleString() },
+        { icon:'fas fa-users',        color:'#3b82f6', bg:'#eff6ff', label:'My Clients',  value: d.my_clients,  ...trendOf(d,'my_clients_delta')  },
+        { icon:'fas fa-file-invoice', color:'#10b981', bg:'#f0fdf4', label:'Quotations',   value: d.my_quotes,   ...trendOf(d,'my_quotes_delta')   },
+        { icon:'fas fa-shield-alt',   color:'#f59e0b', bg:'#fffbeb', label:'Active Policies', value: d.my_active, ...trendOf(d,'my_active_delta') },
+        { icon:'fas fa-coins',        color:'#8b5cf6', bg:'#f5f3ff', label:'My Premium',   value: 'KES ' + Number(d.my_premium).toLocaleString(), ...trendOf(d,'my_premium_delta') },
     ];
     renderStatCards(items);
     renderChart(
@@ -410,21 +413,59 @@ function renderAgentStats(d) {
     );
 }
 
+// Builds a {trend, up} object from an optional backend delta field, so KPI
+// cards show a "+12% ▲" pill only when the API actually sends a delta. Returns
+// {} when absent, which spreads harmlessly into the card config.
+// Accepts either a number (sign infers up/down, formatted as "+N%") or a
+// ready-made string plus an explicit `<key>_up` boolean.
+function trendOf(d, key) {
+    const raw = d[key];
+    if (raw === undefined || raw === null || raw === '') return {};
+    const up = (d[key + '_up'] !== undefined)
+        ? d[key + '_up']
+        : (typeof raw === 'number' ? raw >= 0 : true);
+    const trend = (typeof raw === 'number')
+        ? (raw >= 0 ? '+' : '') + raw + '%'
+        : String(raw);
+    return { trend, up };
+}
+
 function renderStatCards(items) {
-    document.getElementById('statsGrid').innerHTML = items.map(it => `
+    document.getElementById('statsGrid').innerHTML = items.map(it => {
+        const trend = it.trend
+            ? `<div class="trend ${it.up === false ? 'down' : 'up'}">
+                 <i class="fas fa-arrow-${it.up === false ? 'down' : 'up'}"></i> ${it.trend}
+               </div>`
+            : '';
+        return `
         <div class="stat-card">
             <div class="icon" style="background:${it.bg}; color:${it.color};">
                 <i class="${it.icon}"></i>
             </div>
             <div class="value">${it.value ?? '—'}</div>
             <div class="label">${it.label}</div>
-        </div>
-    `).join('');
+            ${trend}
+        </div>`;
+    }).join('');
 }
 
 function renderChart(labels, values) {
     const ctx = document.getElementById('mainChart');
     if (chartInstance) chartInstance.destroy();
+
+    // Scriptable fill: a soft vertical gradient (navy bottom → brand blue top),
+    // built from the chart area so it scales correctly at any size. Falls back
+    // to a flat blue before the first layout pass.
+    const barGradient = (context) => {
+        const { chart } = context;
+        const { ctx: c, chartArea } = chart;
+        if (!chartArea) return 'rgba(37, 99, 235, 0.85)';
+        const g = c.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+        g.addColorStop(0, 'rgba(30, 64, 175, 0.35)');   // soft navy base
+        g.addColorStop(1, 'rgba(37, 99, 235, 0.95)');   // brand blue crest
+        return g;
+    };
+
     chartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -432,14 +473,44 @@ function renderChart(labels, values) {
             datasets: [{
                 label: 'Overview',
                 data: values,
-                backgroundColor: ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444'],
+                backgroundColor: barGradient,
+                hoverBackgroundColor: 'rgba(234, 88, 12, 0.92)',  // brand orange on hover
                 borderRadius: 8,
                 borderSkipped: false,
+                barPercentage: 0.6,
+                categoryPercentage: 0.7,
             }]
         },
         options: {
-            plugins: { legend: { display: false } },
-            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#0f172a',
+                    titleColor: '#f1f5f9',
+                    bodyColor: '#cbd5e1',
+                    padding: 10,
+                    cornerRadius: 8,
+                    displayColors: false,
+                    callbacks: { label: (item) => ` ${item.parsed.y}` }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: { color: '#64748b', font: { size: 12, family: 'Inter' } }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(148, 163, 184, .15)' },   // subtle gridlines only
+                    border: { display: false },
+                    ticks: {
+                        stepSize: 1,
+                        color: '#94a3b8',
+                        font: { size: 12, family: 'Inter' }
+                    }
+                }
+            }
         }
     });
 }
@@ -452,13 +523,15 @@ function renderChart(labels, values) {
 // rows into stacked cards on narrow screens without any JS restructuring.
 async function loadAgents() {
     const tbody = document.getElementById('agentsBody');
+    tbody.innerHTML = skeletonRowsHTML(8, 5);
     try {
         const res  = await fetch('/api/admin/agents');
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         const data = await res.json();
 
         if (!data.agents || data.agents.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">No agents found.</td></tr>';
+            tbody.innerHTML = emptyRowHTML(8, 'fa-user-slash', 'No agents yet',
+                'Registered agents will appear here once they sign up.');
             return;
         }
 
@@ -501,7 +574,8 @@ async function loadAgents() {
         `).join('');
     } catch (err) {
         console.error('Failed to load agents:', err);
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:20px;">Failed to load agents. Please refresh.</td></tr>';
+        tbody.innerHTML = emptyRowHTML(8, 'fa-triangle-exclamation', 'Could not load agents', 'Please refresh to try again.');
+        showToast('Failed to load agents', 'error');
     }
 }
 
@@ -547,12 +621,13 @@ async function setAgentStatus(id, status) {
             const el = document.getElementById(`astatus-${id}`);
             el.className = `badge badge-${status}`;
             el.innerText = status;
+            showToast(`Agent ${status}`, 'success');
         } else {
-            alert('Failed to update agent status.');
+            showToast('Failed to update agent status.', 'error');
         }
     } catch (err) {
         console.error('Error updating agent status:', err);
-        alert('Server communication error. Please try again.');
+        showToast('Server communication error. Please try again.', 'error');
     }
     const panel = document.getElementById(`amenu-${id}`);
     if (panel) panel.classList.remove('show');
@@ -569,12 +644,13 @@ async function unflagAgent(id) {
         });
         if (res.ok) {
             loadAgents(); // simplest correct way to refresh the flag cell + menu
+            showToast('Flag cleared', 'success');
         } else {
-            alert('Failed to clear flag.');
+            showToast('Failed to clear flag.', 'error');
         }
     } catch (err) {
         console.error('Error clearing flag:', err);
-        alert('Server communication error. Please try again.');
+        showToast('Server communication error. Please try again.', 'error');
     }
 }
 async function deleteAgent(id, fullName) {
@@ -583,7 +659,7 @@ async function deleteAgent(id, fullName) {
     );
     if (typed === null) return;
     if (typed.trim() !== fullName.trim()) {
-        alert('Name did not match. Delete cancelled.');
+        showToast('Name did not match. Delete cancelled.', 'info');
         return;
     }
 
@@ -595,15 +671,15 @@ async function deleteAgent(id, fullName) {
         const data = await res.json();
 
         if (!res.ok) {
-            alert(data.error || 'Failed to delete agent.');
+            showToast(data.error || 'Failed to delete agent.', 'error');
             return;
         }
 
-        alert('Agent and all associated records have been permanently deleted.');
+        showToast('Agent and all associated records have been permanently deleted.', 'success');
         loadAgents();
     } catch (err) {
         console.error('Error deleting agent:', err);
-        alert('Server communication error. Please try again.');
+        showToast('Server communication error. Please try again.', 'error');
     }
 }
 
@@ -621,22 +697,23 @@ async function suspendUser(id, fullName) {
         const data = await res.json();
 
         if (!res.ok) {
-            alert(data.error || 'Failed to suspend user.');
+            showToast(data.error || 'Failed to suspend user.', 'error');
             return;
         }
 
-        alert('Agent suspended. Their records were preserved.');
+        showToast('Agent suspended. Their records were preserved.', 'success');
         loadAgents();
 
     } catch (error) {
         console.error('Error suspending agent:', error);
-        alert('Server communication error. Please try again.');
+        showToast('Server communication error. Please try again.', 'error');
     }
 }
 
 // ── Policies (agent view) ───────────────────────────────────────────────────
 async function loadPolicies() {
     const tbody = document.getElementById('policiesBody');
+    tbody.innerHTML = skeletonRowsHTML(7, 5);
     try {
         const res  = await fetch('/api/policies/list');
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
@@ -644,7 +721,8 @@ async function loadPolicies() {
 
         const rows = data.policies || [];
         if (rows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px;">No active policies yet.</td></tr>';
+            tbody.innerHTML = emptyRowHTML(7, 'fa-shield-halved', 'No active policies yet',
+                'Policies you issue will show up here.');
             return;
         }
 
@@ -669,7 +747,8 @@ async function loadPolicies() {
         }).join('');
     } catch (err) {
         console.error('Failed to load policies:', err);
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:20px;">Failed to load policies. Please refresh.</td></tr>';
+        tbody.innerHTML = emptyRowHTML(7, 'fa-triangle-exclamation', 'Could not load policies', 'Please refresh to try again.');
+        showToast('Failed to load policies', 'error');
     }
 }
 
@@ -722,6 +801,48 @@ function esc(s) {
 // the string literal.
 function escAttr(s) {
     return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+}
+
+// ── Loading + empty-state helpers ─────────────────────────────────────────
+// Skeleton rows for any responsive table while data fetches. `cols` matches
+// the <th> count so the shimmer bars line up under the headers.
+function skeletonRowsHTML(cols, rows) {
+    rows = rows || 5;
+    let html = '';
+    for (let r = 0; r < rows; r++) {
+        html += '<tr>';
+        for (let c = 0; c < cols; c++) {
+            const w = 45 + ((r * 7 + c * 13) % 45);   // pseudo-varied width
+            html += `<td data-label="" class="skeleton-cell"><div class="skeleton" style="width:${w}%;"></div></td>`;
+        }
+        html += '</tr>';
+    }
+    return html;
+}
+
+// Friendly empty state rendered inside a single <td colspan="N">.
+function emptyRowHTML(cols, icon, title, subtitle) {
+    return `<tr><td colspan="${cols}">
+        <div class="empty-state">
+            <i class="fas ${icon}"></i>
+            <h4>${esc(title)}</h4>
+            ${subtitle ? `<p>${esc(subtitle)}</p>` : ''}
+        </div>
+    </td></tr>`;
+}
+
+// ── Toast notifications (replaces inline alert() for action feedback) ──────
+function showToast(msg, type, ms) {
+    type = type || 'info';
+    ms = ms || 3500;
+    let c = document.getElementById('toast-container');
+    if (!c) { c = document.createElement('div'); c.id = 'toast-container'; document.body.appendChild(c); }
+    const icons = { success: 'fa-circle-check', error: 'fa-circle-exclamation', info: 'fa-circle-info' };
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i><span>${esc(msg)}</span>`;
+    c.appendChild(t);
+    setTimeout(() => { t.classList.add('leaving'); setTimeout(() => t.remove(), 250); }, ms);
 }
 
 // ── Double Insurance Check ───────────────────────────────────────────────────
@@ -798,13 +919,19 @@ let dmvicConfirmationPolicyNo = null;
 
 async function loadDmvicConfirmations() {
     const box = document.getElementById('dmvicConfirmationsBox');
+    box.innerHTML = `<div class="table-scroll"><table class="agent-table responsive-table">
+        <thead><tr><th>Policy</th><th>Vehicle</th><th>Insured</th><th>Agent</th><th>Premium</th><th>Reason</th><th></th></tr></thead>
+        <tbody>${skeletonRowsHTML(7, 4)}</tbody></table></div>`;
     try {
         const res = await fetch('/api/admin/dmvic/pending-confirmations');
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         const data = await res.json();
         const rows = data.pending || [];
         if (!rows.length) {
-            box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">No DMVIC policy alerts are awaiting confirmation.</p>';
+            box.innerHTML = `<div class="empty-state"><i class="fas fa-circle-check"></i>
+                <h4>No DMVIC alerts pending</h4>
+                <p>Certificate alerts that need manual review will appear here.</p></div>`;
+            if (window.wlAiPulse) window.wlAiPulse(false);
             return;
         }
 
@@ -820,17 +947,21 @@ async function loadDmvicConfirmations() {
                             <td data-label="Agent">${esc(row.agent_name || '—')}</td>
                             <td data-label="Premium">KES ${Number(row.total_payable || 0).toLocaleString()}</td>
                             <td data-label="Reason" style="font-size:12px;color:#991b1b;max-width:260px;">${esc(row.dmvic_error || '—')}</td>
-                            <td data-label=""><button type="button" class="dmvic-review-button" data-policy="${esc(row.policy_no)}" data-reason="${esc(row.dmvic_error || '')}"
-                                style="padding:6px 14px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Review</button></td>
+                            <td data-label=""><button type="button" class="dmvic-review-button btn-primary" data-policy="${esc(row.policy_no)}" data-reason="${esc(row.dmvic_error || '')}"
+                                style="padding:6px 14px;font-size:12px;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Review</button></td>
                         </tr>`).join('')}</tbody>
                 </table>
             </div>`;
         box.querySelectorAll('.dmvic-review-button').forEach(button => {
             button.addEventListener('click', () => openDmvicConfirmModal(button.dataset.policy, button.dataset.reason));
         });
+        // Nudge the assistant bubble so an admin notices a proactive heads-up.
+        if (window.wlAiPulse) window.wlAiPulse(true);
     } catch (err) {
         console.error('Failed to load DMVIC confirmations:', err);
-        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Failed to load DMVIC policy alerts. Please refresh.</p>';
+        box.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i>
+            <h4>Could not load DMVIC alerts</h4><p>Please refresh to try again.</p></div>`;
+        showToast('Failed to load DMVIC alerts', 'error');
     }
 }
 
@@ -856,7 +987,7 @@ async function submitDmvicConfirmation(isApproved) {
     const vehicleInspected = document.getElementById('dmvicModalInspected').checked;
     const comments = document.getElementById('dmvicModalComments').value.trim();
     if (isApproved && !(logbookVerified && vehicleInspected)) {
-        alert('Confirm both the logbook verification and the vehicle inspection before approving.');
+        showToast('Confirm both the logbook verification and the vehicle inspection before approving.', 'error');
         return;
     }
     if (!isApproved && !confirm('Reject this DMVIC issuance? The policy will require manual handling.')) return;
@@ -876,12 +1007,14 @@ async function submitDmvicConfirmation(isApproved) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'DMVIC did not accept the confirmation.');
         if (!data.success) throw new Error(data.error || 'DMVIC did not confirm the issuance.');
-        alert(isApproved ? `Certificate issued${data.certificate_no ? ': ' + data.certificate_no : '.'}` : 'DMVIC issuance rejected.');
+        showToast(isApproved
+            ? `Certificate issued${data.certificate_no ? ': ' + data.certificate_no : '.'}`
+            : 'DMVIC issuance rejected.', isApproved ? 'success' : 'info');
         closeDmvicConfirmModal();
         loadDmvicConfirmations();
     } catch (err) {
         console.error('Failed to submit DMVIC confirmation:', err);
-        alert(err.message || 'Server communication error. Please try again.');
+        showToast(err.message || 'Server communication error. Please try again.', 'error');
     }
 }
 
@@ -889,7 +1022,7 @@ async function recordDmvicSupportAlert() {
     const policyNo = document.getElementById('dmvicSupportPolicyNo').value.trim();
     const issuanceRequestId = document.getElementById('dmvicSupportRequestId').value.trim();
     if (!policyNo || !issuanceRequestId) {
-        alert('Enter both the policy number and the Issuance Request ID from DMVIC Support.');
+        showToast('Enter both the policy number and the Issuance Request ID from DMVIC Support.', 'error');
         return;
     }
     try {
@@ -902,11 +1035,11 @@ async function recordDmvicSupportAlert() {
         if (!res.ok) throw new Error(data.error || 'Could not record the DMVIC policy alert.');
         document.getElementById('dmvicSupportPolicyNo').value = '';
         document.getElementById('dmvicSupportRequestId').value = '';
-        alert(data.message || 'DMVIC alert added to the confirmation queue.');
+        showToast(data.message || 'DMVIC alert added to the confirmation queue.', 'success');
         loadDmvicConfirmations();
     } catch (err) {
         console.error('Failed to record DMVIC policy alert:', err);
-        alert(err.message || 'Server communication error. Please try again.');
+        showToast(err.message || 'Server communication error. Please try again.', 'error');
     }
 }
 
@@ -926,6 +1059,9 @@ async function loadDeclarations() {
 
 async function loadPendingDeclarations() {
     const box = document.getElementById('declarationsGroups');
+    box.innerHTML = `<div class="table-scroll"><table class="agent-table responsive-table">
+        <thead><tr><th></th><th>Policy No</th><th>Certificate #</th><th>Insured</th><th>Vehicle</th><th>Premium</th></tr></thead>
+        <tbody>${skeletonRowsHTML(6, 4)}</tbody></table></div>`;
     try {
         const res = await fetch('/api/admin/declarations/pending');
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
@@ -934,7 +1070,9 @@ async function loadPendingDeclarations() {
 
         const companies = Object.keys(_pendingDeclarations);
         if (companies.length === 0) {
-            box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Nothing pending — every issued certificate has been declared.</p>';
+            box.innerHTML = `<div class="empty-state"><i class="fas fa-circle-check"></i>
+                <h4>Nothing pending</h4>
+                <p>Every issued certificate has been declared.</p></div>`;
             return;
         }
 
@@ -977,7 +1115,9 @@ async function loadPendingDeclarations() {
         }).join('');
     } catch (err) {
         console.error('Failed to load pending declarations:', err);
-        box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Failed to load pending certificates. Please refresh.</p>';
+        box.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i>
+            <h4>Could not load pending certificates</h4><p>Please refresh to try again.</p></div>`;
+        showToast('Failed to load pending declarations', 'error');
     }
 }
 
@@ -994,7 +1134,7 @@ function _selectedPolicyNos(company) {
 function openDeclarationModal(company) {
     const selected = _selectedPolicyNos(company);
     if (selected.length === 0) {
-        alert('Select at least one certificate first.');
+        showToast('Select at least one certificate first.', 'info');
         return;
     }
     const group = _pendingDeclarations[company];
@@ -1021,12 +1161,12 @@ async function confirmSendDeclaration() {
 
     const mpesaMessage = document.getElementById('declModalMpesa').value.trim();
     if (!mpesaMessage) {
-        alert('Please paste the M-Pesa confirmation message.');
+        showToast('Please paste the M-Pesa confirmation message.', 'info');
         return;
     }
     const policyNos = _selectedPolicyNos(company);
     if (policyNos.length === 0) {
-        alert('No certificates selected.');
+        showToast('No certificates selected.', 'info');
         closeDeclarationModal();
         return;
     }
@@ -1039,22 +1179,24 @@ async function confirmSendDeclaration() {
         });
         const data = await res.json();
         if (!res.ok) {
-            alert(data.error || 'Failed to send declaration.');
+            showToast(data.error || 'Failed to send declaration.', 'error');
             return;
         }
-        alert(data.email_sent
+        showToast(data.email_sent
             ? `Declaration sent to ${data.sent_to}.`
-            : `Declaration saved, but the email failed to send. You can download and send it manually.`);
+            : 'Declaration saved, but the email failed to send — you can download and send it manually.',
+            data.email_sent ? 'success' : 'info');
         closeDeclarationModal();
         loadDeclarations();
     } catch (err) {
         console.error('Failed to send declaration:', err);
-        alert('Server communication error. Please try again.');
+        showToast('Server communication error. Please try again.', 'error');
     }
 }
 
 async function loadDeclarationsHistory() {
     const tbody = document.getElementById('declarationsHistoryBody');
+    tbody.innerHTML = skeletonRowsHTML(7, 4);
     try {
         const res = await fetch('/api/admin/declarations/history');
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
@@ -1062,7 +1204,8 @@ async function loadDeclarationsHistory() {
         const rows = data.declarations || [];
 
         if (rows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:16px;">No declarations sent yet.</td></tr>';
+            tbody.innerHTML = emptyRowHTML(7, 'fa-paper-plane', 'No declarations sent yet',
+                'Sent declarations will be logged here.');
             return;
         }
 
@@ -1080,7 +1223,8 @@ async function loadDeclarationsHistory() {
             </tr>`).join('');
     } catch (err) {
         console.error('Failed to load declaration history:', err);
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:16px;">Failed to load history.</td></tr>';
+        tbody.innerHTML = emptyRowHTML(7, 'fa-triangle-exclamation', 'Could not load history', 'Please refresh to try again.');
+        showToast('Failed to load declaration history', 'error');
     }
 }
 
@@ -1109,6 +1253,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
+<!-- Toast notification mount point (populated by showToast()) -->
+<div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
 {% include '_ai_assistant.html' %}
 
 </body>

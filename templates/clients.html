@@ -227,6 +227,9 @@ async function loadClients() {
     const tbody  = document.getElementById('clientTableBody');
     const msgEl  = document.getElementById('table_msg');
 
+    tbody.innerHTML = skeletonRows(5, 5);
+    msgEl.innerText = '';
+
     try {
         const res  = await fetch('/api/clients/list');
         const data = await res.json();
@@ -240,6 +243,20 @@ async function loadClients() {
     }
 }
 
+function skeletonRows(cols, rows) {
+    rows = rows || 5;
+    let html = '';
+    for (let r = 0; r < rows; r++) {
+        html += '<tr>';
+        for (let c = 0; c < cols; c++) {
+            const w = 45 + ((r * 7 + c * 13) % 45);
+            html += `<td><div class="skeleton" style="height:12px;width:${w}%;"></div></td>`;
+        }
+        html += '</tr>';
+    }
+    return html;
+}
+
 function renderTable(clients) {
     const tbody    = document.getElementById('clientTableBody');
     const tableMsg = document.getElementById('table_msg');
@@ -248,8 +265,11 @@ function renderTable(clients) {
     countEl.innerText = `(${clients.length})`;
 
     if (clients.length === 0) {
-        tbody.innerHTML = '';
-        tableMsg.innerText = 'No clients found.';
+        tableMsg.innerText = '';
+        tbody.innerHTML = `<tr><td colspan="5">
+            <div class="empty-state"><i class="fas fa-user-slash"></i>
+            <h4>No clients found</h4><p>Add a client on the left to get started.</p></div>
+        </td></tr>`;
         return;
     }
 
