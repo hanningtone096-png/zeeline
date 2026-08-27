@@ -32,6 +32,9 @@
     <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu"><i class="fas fa-times"></i></button></div>
     <ul class="nav-links">
         <li class="active"><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        {% if session['role'] == 'admin' %}
+        <li><a href="/admin/agents"><i class="fas fa-users-cog"></i> Agents</a></li>
+        {% endif %}
         <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
         <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
         <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
@@ -108,13 +111,17 @@
             </div>
         </details>
 
-        <!-- Agent Management -->
+        <!-- Agent Management (pending only — search all agents on /admin/agents) -->
         <details class="section-card collapsible-section" id="sectionAgents" open>
             <summary>
-                <h3><i class="fas fa-users-cog" style="color:#2563eb;"></i> Agent Management</h3>
+                <h3><i class="fas fa-users-cog" style="color:#2563eb;"></i> Pending Agents</h3>
                 <i class="fas fa-chevron-down chevron"></i>
             </summary>
             <div class="collapsible-body">
+                <p style="font-size:13px;color:#64748b;margin:-4px 0 12px;">
+                    Agents awaiting your approval. To find an approved, suspended, or rejected agent,
+                    <a href="/admin/agents" style="color:#1d4ed8;font-weight:600;">search all agents →</a>
+                </p>
                 <div class="table-scroll">
                     <table class="agent-table responsive-table" id="agentsTable">
                         <thead>
@@ -331,7 +338,7 @@ async function loadDashboard() {
             buildQuickJumpNav([
                 { href: '#sectionDoubleCheck', label: 'Double Check', icon: 'fa-search' },
                 { href: '#sectionReports',     label: 'Reports',      icon: 'fa-file-download' },
-                { href: '#sectionAgents',      label: 'Agents',       icon: 'fa-users-cog' },
+                { href: '#sectionAgents',      label: 'Pending',      icon: 'fa-users-cog' },
                 { href: '#sectionDmvic',       label: 'DMVIC',        icon: 'fa-triangle-exclamation' },
                 { href: '#sectionDeclarations',label: 'Declarations', icon: 'fa-stamp' },
             ]);
@@ -525,13 +532,13 @@ async function loadAgents() {
     const tbody = document.getElementById('agentsBody');
     tbody.innerHTML = skeletonRowsHTML(8, 5);
     try {
-        const res  = await fetch('/api/admin/agents');
+        const res  = await fetch('/api/admin/agents?status=pending');
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         const data = await res.json();
 
         if (!data.agents || data.agents.length === 0) {
-            tbody.innerHTML = emptyRowHTML(8, 'fa-user-slash', 'No agents yet',
-                'Registered agents will appear here once they sign up.');
+            tbody.innerHTML = emptyRowHTML(8, 'fa-circle-check', 'No agents awaiting approval',
+                'New sign-ups will appear here for review.');
             return;
         }
 

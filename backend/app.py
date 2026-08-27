@@ -3073,6 +3073,12 @@ def claims_page():
 def renewals_page():
     return render_template('renewals.html')
 
+@app.route('/admin/agents')
+@login_required
+@admin_required
+def admin_agents_page():
+    return render_template('admin_agents.html')
+
 @app.route('/terms')
 def terms_page():
     return render_template('terms.html')
@@ -3416,7 +3422,30 @@ def dashboard_stats():
 @login_required
 @admin_required
 def list_agents():
-    agents = query("""
+    # Optional filters:
+    #   ?status=pending|approved|rejected|suspended  — used by the dashboard's
+    #     "Pending Agents" panel so it only loads agents awaiting approval.
+    #   ?q=<text>  — LIKE match on full_name / username / email, used by the
+    #     /admin/agents search page. Results appear only when a search is run;
+    #     no q (and no status) returns every agent as before.
+    status = (request.args.get('status') or '').strip().lower()
+    q      = (request.args.get('q') or '').strip()
+
+    where  = ["u.role = 'agent'"]
+    params = []
+
+    if status in ('pending', 'approved', 'rejected', 'suspended'):
+        where.append("u.status = %s")
+        params.append(status)
+
+    if q:
+        like = f"%{q}%"
+        where.append("(u.full_name ILIKE %s OR u.username ILIKE %s OR u.email ILIKE %s)")
+        params.extend([like, like, like])
+
+    where_clause = " AND ".join(where)
+
+    agents = query(f"""
         SELECT u.id, u.full_name, u.username, u.email, u.status, u.created_at,
                u.flagged, u.flagged_reason, u.flagged_at, u.underpayment_attempts,
                COUNT(DISTINCT q.id)                       AS total_quotes,
@@ -3427,10 +3456,10 @@ def list_agents():
         LEFT JOIN quotations q ON q.agent_id = u.id
         LEFT JOIN policies   p ON p.agent_id = u.id
         LEFT JOIN clients    c ON c.agent_id = u.id
-        WHERE  u.role = 'agent'
+        WHERE  {where_clause}
         GROUP BY u.id
         ORDER BY u.created_at DESC
-    """)
+    """, params)
     return jsonify({"agents": agents})
 
 

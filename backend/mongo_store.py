@@ -507,7 +507,12 @@ class MongoStore:
 
     def _read(self, sql, sql_l, params):
         if "from users u" in sql_l and "where u.role = 'agent'" in sql_l:
-            return self._agent_summary(params, period_start=("date(q.created_at)" in sql_l))
+            return self._agent_summary(
+                params,
+                period_start=("date(q.created_at)" in sql_l),
+                status="u.status = %s" in sql_l,
+                q="ilike" in sql_l,
+            )
         if "from clients c left join users" in sql_l:
             return self._clients_with_agents(params if "where c.agent_id" in sql_l else ())
         if "from claims c left join users" in sql_l:
@@ -599,9 +604,26 @@ class MongoStore:
         rows = self._find_many("claims", filter_doc, sort=[("created_at", DESCENDING)])
         return [self._with_agent(r) for r in rows]
 
-    def _agent_summary(self, params, *, period_start=False):
+    def _agent_summary(self, params, *, period_start=False, status=False, q=False):
         start = _as_date(params[0]) if period_start and params else None
-        agents = self._find_many("users", {"role": "agent"}, sort=[("created_at", DESCENDING)])
+        # Optional filters built by list_agents() in app.py. Params arrive in
+        # the order app.py builds them: [status]?, then three identical LIKE
+        # patterns for (full_name / username / email). The reports query
+        # (period_start) never combines with these, so there is no overlap.
+        user_filter = {"role": "agent"}
+        needle = None
+        idx = 0
+        if status:
+            user_filter["status"] = params[idx]
+            idx += 1
+        if q:
+            needle = str(params[idx]).replace("%", "").lower()
+        agents = self._find_many("users", user_filter, sort=[("created_at", DESCENDING)])
+        if needle:
+            agents = [a for a in agents
+                      if needle in str(a.get("full_name") or "").lower()
+                      or needle in str(a.get("username") or "").lower()
+                      or needle in str(a.get("email") or "").lower()]
         rows = []
         for agent in agents:
             aid = agent["id"]

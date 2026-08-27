@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<meta name="robots" content="noindex,nofollow">
+<title>WESTLAKE INSURANCE - Agents</title>
+<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    /* Page-local search bar — reuses the rest of dashboard.css */
+    .agents-toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 18px;
+    }
+    .search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 240px;
+    }
+    .search-wrap i {
+        position: absolute;
+        left: 13px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #94a3b8;
+        font-size: 14px;
+    }
+    .search-wrap input {
+        width: 100%;
+        padding: 11px 14px 11px 38px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font-size: 14px;
+        box-sizing: border-box;
+        background: #fff;
+        color: #1e293b;
+    }
+    .search-wrap input:focus {
+        outline: none;
+        border-color: var(--brand-blue);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+    }
+    .search-hint {
+        font-size: 13px;
+        color: #64748b;
+        margin: -6px 0 14px;
+    }
+    .results-meta {
+        font-size: 12px;
+        color: #64748b;
+        margin-bottom: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+</style>
+</head>
+<body>
+
+<!-- ── Mobile top bar ── -->
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="openSidebar()" aria-label="Open menu">
+        <i class="fas fa-bars"></i>
+    </button>
+    <span class="brand">WESTLAKE</span>
+    <button class="logout-btn" onclick="logout()" aria-label="Logout" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
+        <i class="fas fa-sign-out-alt"></i>
+    </button>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<div class="app-container">
+
+<aside class="sidebar">
+    <div class="logo">
+        <img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;">
+        <button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu"><i class="fas fa-times"></i></button>
+    </div>
+    <ul class="nav-links">
+        <li><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        {% if session['role'] == 'admin' %}
+        <li class="active"><a href="/admin/agents"><i class="fas fa-users-cog"></i> Agents</a></li>
+        {% endif %}
+        <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
+        <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
+        <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
+        <li><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li><a href="/privacy"><i class="fas fa-shield-alt"></i> privacy policy</a></li>
+        <li><a href="/terms"><i class="fas fa-gavel"></i> terms and conditions</a></li>
+    </ul>
+</aside>
+
+<main class="main-content">
+
+    <div class="top-header">
+        <h1>Agents</h1>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+
+    <div class="section-card">
+        <h3><i class="fas fa-users-cog" style="color:#2563eb;"></i> Find an agent</h3>
+        <p class="search-hint">Search by name, username, or email. Approved, suspended, and rejected agents appear only after a search.</p>
+
+        <div class="agents-toolbar">
+            <div class="search-wrap">
+                <i class="fas fa-search"></i>
+                <input type="text" id="agentSearch" placeholder="e.g. Jane, jdoe, jane@example.com"
+                       onkeydown="if(event.key==='Enter') searchAgents()">
+            </div>
+            <button class="btn-primary" onclick="searchAgents()" style="padding:11px 18px;">
+                <i class="fas fa-search"></i> Search
+            </button>
+        </div>
+
+        <div id="resultsMeta" class="results-meta" style="display:none;"></div>
+
+        <div class="table-scroll">
+            <table class="agent-table responsive-table" id="agentsTable">
+                <thead>
+                    <tr>
+                        <th scope="col">Agent</th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Flag</th>
+                        <th scope="col">Quotes</th>
+                        <th scope="col">Policies</th>
+                        <th scope="col">Premium (KES)</th>
+                        <th scope="col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</main>
+</div>
+
+<!-- Toast notification mount point -->
+<div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+function withCsrf(headers = {}) { return { ...headers, 'X-CSRFToken': CSRF_TOKEN }; }
+
+let lastQuery = '';
+
+document.addEventListener('DOMContentLoaded', showPreSearchState);
+
+// ── Search ────────────────────────────────────────────────────────────────
+function showPreSearchState() {
+    const tbody = document.getElementById('resultsBody');
+    const meta  = document.getElementById('resultsMeta');
+    meta.style.display = 'none';
+    tbody.innerHTML = `<tr><td colspan="8">
+        <div class="empty-state">
+            <i class="fas fa-search"></i>
+            <h4>Search to find an agent</h4>
+            <p>Enter a name, username, or email above to look up any agent — including approved, suspended, and rejected accounts.</p>
+        </div>
+    </td></tr>`;
+}
+
+async function searchAgents() {
+    const input = document.getElementById('agentSearch');
+    const q = input.value.trim();
+    const tbody = document.getElementById('resultsBody');
+    const meta  = document.getElementById('resultsMeta');
+
+    if (q.length < 2) {
+        meta.style.display = 'none';
+        tbody.innerHTML = `<tr><td colspan="8">
+            <div class="empty-state"><i class="fas fa-keyboard"></i>
+            <h4>Keep typing…</h4><p>Enter at least 2 characters to search.</p></div>
+        </td></tr>`;
+        return;
+    }
+
+    lastQuery = q;
+    tbody.innerHTML = skeletonRowsHTML(8, 5);
+    meta.style.display = 'none';
+
+    try {
+        const res  = await fetch(`/api/admin/agents?q=${encodeURIComponent(q)}`);
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const data = await res.json();
+        // A later search may have started; ignore stale responses.
+        if (q !== lastQuery) return;
+
+        const agents = data.agents || [];
+        if (agents.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8">
+                <div class="empty-state"><i class="fas fa-user-slash"></i>
+                <h4>No agents found</h4><p>No agents matched “${esc(q)}”.</p></div>
+            </td></tr>`;
+            return;
+        }
+
+        meta.style.display = 'block';
+        meta.innerText = `${agents.length} agent${agents.length === 1 ? '' : 's'} matching “${q}”`;
+        renderAgentRows(agents);
+    } catch (err) {
+        console.error('Agent search failed:', err);
+        tbody.innerHTML = `<tr><td colspan="8">
+            <div class="empty-state"><i class="fas fa-triangle-exclamation"></i>
+            <h4>Search failed</h4><p>Please try again.</p></div>
+        </td></tr>`;
+        showToast('Agent search failed', 'error');
+    }
+}
+
+function renderAgentRows(agents) {
+    document.getElementById('resultsBody').innerHTML = agents.map(a => `
+        <tr id="arow-${a.id}">
+            <td data-label="Agent"><strong>${esc(a.full_name)}</strong><br><span style="font-size:12px;color:#64748b;">@${esc(a.username)}</span></td>
+            <td data-label="Email">${esc(a.email || '—')}</td>
+            <td data-label="Status"><span id="astatus-${a.id}" class="badge badge-${a.status}">${a.status}</span></td>
+            <td data-label="Flag">${renderFlagCell(a)}</td>
+            <td data-label="Quotes">${a.total_quotes}</td>
+            <td data-label="Policies">${a.total_policies}</td>
+            <td data-label="Premium (KES)">KES ${Number(a.total_premium || 0).toLocaleString()}</td>
+            <td data-label="Actions">
+                <div class="actions-cell">
+                    <button class="action-trigger-btn" onclick="toggleActionMenu(event, ${a.id})">
+                        <i class="fas fa-ellipsis-vertical"></i> Actions
+                    </button>
+                    <div class="action-menu-panel" id="amenu-${a.id}">
+                        <button class="action-menu-item item-approve" onclick="setAgentStatus(${a.id},'approved')">
+                            <i class="fas fa-check"></i> Approve
+                        </button>
+                        <button class="action-menu-item item-reject" onclick="setAgentStatus(${a.id},'rejected')">
+                            <i class="fas fa-times"></i> Reject
+                        </button>
+                        <button class="action-menu-item item-suspend" onclick="suspendUser(${a.id}, '${escAttr(a.full_name)}')">
+                            <i class="fas fa-pause"></i> Suspend
+                        </button>
+                        ${a.flagged ? `
+                        <button class="action-menu-item item-suspend" onclick="unflagAgent(${a.id})">
+                            <i class="fas fa-flag"></i> Clear Flag
+                        </button>` : ''}
+                        <div style="border-top:1px solid #e2e8f0;margin:4px 0;"></div>
+                        <button class="action-menu-item item-delete" onclick="deleteAgent(${a.id}, '${escAttr(a.full_name)}')" style="color:#dc2626;">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderFlagCell(a) {
+    if (a.flagged) {
+        const reason = escAttr(a.flagged_reason || 'Flagged for review');
+        const when = a.flagged_at ? new Date(a.flagged_at).toLocaleDateString('en-KE', {day:'2-digit', month:'short', year:'numeric'}) : '';
+        return `<span class="badge" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;cursor:help;" title="${reason}">
+                    <i class="fas fa-flag"></i> Flagged${when ? ' · ' + when : ''}
+                </span>`;
+    }
+    if (a.underpayment_attempts > 0) {
+        return `<span style="font-size:12px;color:#94a3b8;">${a.underpayment_attempts} past attempt(s)</span>`;
+    }
+    return '<span style="color:#cbd5e1;">—</span>';
+}
+
+// Only one action menu open at a time; close on outside click.
+function toggleActionMenu(evt, id) {
+    evt.stopPropagation();
+    const panel = document.getElementById(`amenu-${id}`);
+    const wasOpen = panel.classList.contains('show');
+    document.querySelectorAll('.action-menu-panel.show').forEach(p => p.classList.remove('show'));
+    if (!wasOpen) panel.classList.add('show');
+}
+document.addEventListener('click', () => {
+    document.querySelectorAll('.action-menu-panel.show').forEach(p => p.classList.remove('show'));
+});
+
+// ── Actions (same endpoints as the dashboard) ─────────────────────────────
+async function setAgentStatus(id, status) {
+    try {
+        const res = await fetch(`/api/admin/agents/${id}/status`, {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ status })
+        });
+        if (res.ok) {
+            const el = document.getElementById(`astatus-${id}`);
+            el.className = `badge badge-${status}`;
+            el.innerText = status;
+            showToast(`Agent ${status}`, 'success');
+        } else {
+            showToast('Failed to update agent status.', 'error');
+        }
+    } catch (err) {
+        console.error('Error updating agent status:', err);
+        showToast('Server communication error. Please try again.', 'error');
+    }
+    const panel = document.getElementById(`amenu-${id}`);
+    if (panel) panel.classList.remove('show');
+}
+
+async function unflagAgent(id) {
+    if (!confirm('Clear this underpayment flag? This confirms you have reviewed the attempt.')) return;
+    try {
+        const res = await fetch(`/api/admin/agents/${id}/unflag`, {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' })
+        });
+        if (res.ok) {
+            // Refresh the current search so the flag cell + menu update.
+            searchAgents();
+            showToast('Flag cleared', 'success');
+        } else {
+            showToast('Failed to clear flag.', 'error');
+        }
+    } catch (err) {
+        console.error('Error clearing flag:', err);
+        showToast('Server communication error. Please try again.', 'error');
+    }
+}
+
+async function deleteAgent(id, fullName) {
+    const typed = prompt(
+        `This will PERMANENTLY delete agent "${fullName}" and ALL of their clients, quotations, policies, and claims. This cannot be undone.\n\nType the agent's name exactly to confirm:\n${fullName}`
+    );
+    if (typed === null) return;
+    if (typed.trim() !== fullName.trim()) {
+        showToast('Name did not match. Delete cancelled.', 'info');
+        return;
+    }
+    try {
+        const res = await fetch(`/api/admin/users/${id}`, {
+            method: 'DELETE',
+            headers: withCsrf({ 'Content-Type': 'application/json' })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast(data.error || 'Failed to delete agent.', 'error');
+            return;
+        }
+        const row = document.getElementById(`arow-${id}`);
+        if (row) row.remove();
+        showToast('Agent and all associated records have been permanently deleted.', 'success');
+        // If the last row was removed, fall back to the no-results state.
+        const tbody = document.getElementById('resultsBody');
+        if (!tbody.querySelector('tr[id]')) showNoResultsAfterDelete();
+    } catch (err) {
+        console.error('Error deleting agent:', err);
+        showToast('Server communication error. Please try again.', 'error');
+    }
+}
+
+function showNoResultsAfterDelete() {
+    const meta = document.getElementById('resultsMeta');
+    meta.style.display = 'none';
+    document.getElementById('resultsBody').innerHTML = `<tr><td colspan="8">
+        <div class="empty-state"><i class="fas fa-user-slash"></i>
+        <h4>No agents found</h4><p>No agents matched “${esc(lastQuery)}”.</p></div>
+    </td></tr>`;
+}
+
+async function suspendUser(id, fullName) {
+    if (!confirm(`Suspend agent "${fullName}"? Their access will be disabled, but their clients, quotations, policies, and claims will be kept and can be restored by reactivating the account.`)) return;
+    try {
+        const res = await fetch(`/api/admin/agents/${id}/status`, {
+            method: 'POST',
+            headers: withCsrf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ status: 'suspended' })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast(data.error || 'Failed to suspend user.', 'error');
+            return;
+        }
+        const el = document.getElementById(`astatus-${id}`);
+        if (el) { el.className = 'badge badge-suspended'; el.innerText = 'suspended'; }
+        showToast('Agent suspended. Their records were preserved.', 'success');
+    } catch (error) {
+        console.error('Error suspending agent:', error);
+        showToast('Server communication error. Please try again.', 'error');
+    }
+    const panel = document.getElementById(`amenu-${id}`);
+    if (panel) panel.classList.remove('show');
+}
+
+// ── Skeleton + empty + toast helpers (mirrors dashboard.html) ─────────────
+function skeletonRowsHTML(cols, rows) {
+    rows = rows || 5;
+    let html = '';
+    for (let r = 0; r < rows; r++) {
+        html += '<tr>';
+        for (let c = 0; c < cols; c++) {
+            const w = 45 + ((r * 7 + c * 13) % 45);
+            html += `<td data-label="" class="skeleton-cell"><div class="skeleton" style="width:${w}%;"></div></td>`;
+        }
+        html += '</tr>';
+    }
+    return html;
+}
+
+function showToast(msg, type, ms) {
+    type = type || 'info';
+    ms = ms || 3500;
+    let c = document.getElementById('toast-container');
+    if (!c) { c = document.createElement('div'); c.id = 'toast-container'; document.body.appendChild(c); }
+    const icons = { success: 'fa-circle-check', error: 'fa-circle-exclamation', info: 'fa-circle-info' };
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i><span>${esc(msg)}</span>`;
+    c.appendChild(t);
+    setTimeout(() => { t.classList.add('leaving'); setTimeout(() => t.remove(), 250); }, ms);
+}
+
+function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+    return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+}
+
+async function logout() { await fetch('/api/logout'); window.location.href = '/login'; }
+
+// ── Mobile Sidebar ───────────────────────────────────────────────────────
+function openSidebar() {
+    document.querySelector('.sidebar').classList.add('open');
+    document.getElementById('sidebarOverlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        a.addEventListener('click', closeSidebar);
+    });
+});
+</script>
+</body>
+</html>

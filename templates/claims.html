@@ -146,6 +146,9 @@
     <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu"><i class="fas fa-times"></i></button></div>
     <ul class="nav-links">
         <li><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        {% if session['role'] == 'admin' %}
+        <li><a href="/admin/agents"><i class="fas fa-users-cog"></i> Agents</a></li>
+        {% endif %}
         <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
         <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
         <li class="active"><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
