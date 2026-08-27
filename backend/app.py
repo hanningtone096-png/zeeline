@@ -5184,6 +5184,91 @@ def record_dmvic_policy_alert():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STARTUP SCHEMA SELF-PROVISIONING
+#
+# The notifications / renewal-reminders / commission features added new tables
+# that live in migrations_add_*.sql. Some deployments can't run those migrations
+# by hand (no shell/DB access on the server), so the app provisions them itself
+# on import with CREATE TABLE IF NOT EXISTS. All three are purely additive —
+# new tables only, FKs to existing users/policies — so this is idempotent and
+# safe to run on every start, including under gunicorn/WSGI. If the DB is
+# unreachable the app is broken anyway; we log and continue regardless.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def ensure_schema():
+    """Create the feature tables if they don't already exist. Mirrors
+    migrations_add_notifications.sql, migrations_add_renewal_reminders.sql,
+    and migrations_add_commissions.sql. Idempotent."""
+    statements = [
+        # notifications
+        """CREATE TABLE IF NOT EXISTS notifications (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            user_id     INT NULL,
+            type        VARCHAR(40)  NOT NULL,
+            title       VARCHAR(120) NOT NULL,
+            message     VARCHAR(255) NOT NULL,
+            link        VARCHAR(160),
+            is_read     BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            INDEX idx_user_read (user_id, is_read),
+            INDEX idx_created    (created_at)
+        ) ENGINE=InnoDB""",
+        # renewal_reminders
+        """CREATE TABLE IF NOT EXISTS renewal_reminders (
+            id            INT AUTO_INCREMENT PRIMARY KEY,
+            policy_no     VARCHAR(40)  NOT NULL,
+            recipient     VARCHAR(120) NOT NULL,
+            channel       ENUM('email','sms') NOT NULL DEFAULT 'email',
+            interval_type VARCHAR(10)  NOT NULL,
+            sent_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (policy_no) REFERENCES policies(policy_no) ON DELETE CASCADE,
+            INDEX idx_policy_interval (policy_no, interval_type),
+            INDEX idx_sent             (sent_at)
+        ) ENGINE=InnoDB""",
+        # app_settings (generic key/value)
+        """CREATE TABLE IF NOT EXISTS app_settings (
+            `key`       VARCHAR(60) PRIMARY KEY,
+            `value`     VARCHAR(255) NOT NULL,
+            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB""",
+        # commission_payouts
+        """CREATE TABLE IF NOT EXISTS commission_payouts (
+            id            INT AUTO_INCREMENT PRIMARY KEY,
+            agent_id      INT NOT NULL,
+            period_start  DATE NOT NULL,
+            period_end    DATE NOT NULL,
+            amount        DECIMAL(12,2) NOT NULL,
+            status        ENUM('pending','paid') NOT NULL DEFAULT 'paid',
+            paid_at       TIMESTAMP NULL,
+            created_by    INT,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (agent_id)  REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES users(id),
+            INDEX idx_agent_status (agent_id, status),
+            INDEX idx_period        (period_start, period_end)
+        ) ENGINE=InnoDB""",
+    ]
+    for ddl in statements:
+        try:
+            query(ddl, commit=True)
+        except Exception as e:
+            log.error("ensure_schema: %s failed: %s", ddl.split('(')[0], type(e).__name__)
+    # Seed the default commission rate if absent.
+    try:
+        query("""INSERT IGNORE INTO app_settings (`key`, `value`)
+                 VALUES ('commission_rate_percent', '10')""", commit=True)
+    except Exception as e:
+        log.error("ensure_schema: default commission rate seed failed: %s", type(e).__name__)
+
+
+try:
+    ensure_schema()
+except Exception as e:
+    log.error("ensure_schema aborted: %s", type(e).__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # RENEWAL REMINDER SCHEDULER (APScheduler, in-process)
 #
 # Runs daily and (a) emails renewal reminders to the client + agent for
