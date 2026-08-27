@@ -3380,7 +3380,17 @@ def dashboard_stats():
 
             active_policies = query("SELECT COUNT(*) AS total FROM policies WHERE status='active'", fetchone=True)['total']
 
-            total_premium = float(query("SELECT COALESCE(SUM(total_payable),0) AS total FROM quotations", fetchone=True)['total'])
+            # Today's collected premium: sum only M-Pesa STK payments that Daraja
+            # confirmed (status='completed', method='mpesa'), restricted to
+            # payments settled today. `paid_at` is stamped with NOW() at
+            # settlement, so DATE(paid_at)=CURDATE() resets the total at the
+            # start of each calendar day in the MySQL session timezone. Pending,
+            # failed, cancelled, or reversed transactions are excluded.
+            total_premium = float(query(
+                "SELECT COALESCE(SUM(amount),0) AS total FROM payments "
+                "WHERE status='completed' AND method='mpesa' "
+                "AND paid_at IS NOT NULL AND DATE(paid_at)=CURDATE()",
+                fetchone=True)['total'])
 
             return jsonify({
                 "name":            session.get('name'),

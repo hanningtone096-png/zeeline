@@ -397,7 +397,7 @@ function renderAdminStats(d) {
         { icon:'fas fa-user-tie',      color:'#8b5cf6', bg:'#f5f3ff', label:'Agents',           value: d.total_agents,    ...trendOf(d,'agents_delta')    },
         { icon:'fas fa-file-invoice',  color:'#10b981', bg:'#f0fdf4', label:'Quotations',        value: d.total_quotes,    ...trendOf(d,'quotes_delta')    },
         { icon:'fas fa-shield-alt',    color:'#f59e0b', bg:'#fffbeb', label:'Active Policies',   value: d.active_policies, ...trendOf(d,'policies_delta')  },
-        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:'Total Premium',     value: 'KES ' + Number(d.total_premium).toLocaleString(), ...trendOf(d,'premium_delta') },
+        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:"Today's Premium",   value: 'KES ' + Number(d.total_premium).toLocaleString(), ...trendOf(d,'premium_delta') },
     ];
     renderStatCards(items);
     renderChart(
