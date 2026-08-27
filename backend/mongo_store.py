@@ -506,7 +506,9 @@ class MongoStore:
         return self._collection(table).delete_many(filter_doc).deleted_count
 
     def _read(self, sql, sql_l, params):
-        if "from users u" in sql_l and "where u.role = 'agent'" in sql_l:
+        if "from users u" in sql_l and (
+            "where u.role = 'agent'" in sql_l or "where u.role='agent'" in sql_l
+        ):
             return self._agent_summary(
                 params,
                 period_start=("date(q.created_at)" in sql_l),
@@ -539,6 +541,8 @@ class MongoStore:
             return self._select_simple(sql_l, params)
         if "from payments" in sql_l:
             return self._select_simple(sql_l, params)
+        if "from notifications" in sql_l:
+            return self._select_simple(sql_l, params)
         if "from declarations where" in sql_l:
             return self._select_simple(sql_l, params)
         raise NotImplementedError(f"Unsupported Mongo read query: {sql}")
@@ -559,7 +563,8 @@ class MongoStore:
         sort = None
         if "order by created_at desc" in sql_l:
             sort = [("created_at", DESCENDING)]
-        limit = 1 if "limit 1" in sql_l else 200 if "limit 200" in sql_l else 0
+        m = re.search(r"limit (\d+)", sql_l)
+        limit = int(m.group(1)) if m else 0
         rows = self._find_many(table, filter_doc, sort=sort, limit=limit)
         return rows
 
@@ -640,6 +645,7 @@ class MongoStore:
                 "email": agent.get("email"),
                 "status": agent.get("status"),
                 "created_at": agent.get("created_at"),
+                "commission_payout": agent.get("commission_payout"),
                 "flagged": agent.get("flagged", 0),
                 "flagged_reason": agent.get("flagged_reason"),
                 "flagged_at": agent.get("flagged_at"),
@@ -654,12 +660,17 @@ class MongoStore:
 
     def _policies_join(self, sql_l, params):
         filter_doc = {}
-        if "where p.agent_id = %s" in sql_l:
+        if "where p.agent_id = %s" in sql_l or "where p.agent_id=%s" in sql_l:
             filter_doc["agent_id"] = int(params[0])
         elif "where policy_no=%s" in sql_l or "where p.policy_no=%s" in sql_l:
             filter_doc["policy_no"] = params[0]
         elif "where id=%s" in sql_l or "where p.id=%s" in sql_l:
             filter_doc["id"] = int(params[0])
+
+        # Commission summary queries WHERE p.status='active'; only count active
+        # policies, not the agent's whole book (incl. expired/cancelled).
+        if "p.status='active'" in sql_l or "p.status = 'active'" in sql_l:
+            filter_doc["status"] = "active"
 
         rows = self._find_many("policies", filter_doc, sort=[("created_at", DESCENDING)])
 
