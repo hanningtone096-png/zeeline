@@ -5269,27 +5269,26 @@ except Exception as e:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RENEWAL REMINDER SCHEDULER (APScheduler, in-process)
+# RENEWAL REMINDER SCHEDULER (stdlib threading, in-process)
 #
 # Runs daily and (a) emails renewal reminders to the client + agent for
 # policies expiring in exactly 30/14/3 days, logging each send in
 # renewal_reminders so an interval is never double-sent, and (b) creates
 # in-app policy_expiring bell notifications at 7/3/1 days. Email goes via
-# the existing Brevo/SMTP send_email path. APScheduler is optional: if it
-# isn't installed the app still runs, just without the daily job.
+# the existing Brevo/SMTP send_email path.
+#
+# Implemented on a plain daemon thread instead of APScheduler so there is
+# no third-party dependency to install on the server. The renewal_reminders
+# dedupe + notification dedupe make a duplicated fire (e.g. one per gunicorn
+# worker) a no-op, so multi-worker safety is preserved without an advisory
+# lock. Started at import time so it runs under `python app.py` AND under
+# gunicorn/WSGI; the reloader guard keeps it to one thread in debug mode.
 # ─────────────────────────────────────────────────────────────────────────────
-
-try:
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.triggers.cron import CronTrigger
-    _SCHEDULER_AVAILABLE = True
-except ImportError:
-    _SCHEDULER_AVAILABLE = False
-    log.warning("APScheduler not installed — renewal reminders disabled. "
-                "Run `pip install APScheduler` to enable them.")
 
 REMINDER_INTERVALS = (30, 14, 3)   # email reminders, days before expiry
 NOTIFY_INTERVALS   = (7, 3, 1)     # in-app bell notifications, days before expiry
+DAILY_JOB_HOUR   = 8               # 08:07 local — off the top of the hour
+DAILY_JOB_MINUTE = 7
 
 
 def _send_renewal_reminder(policy_no, days, recipient, recipient_name):
@@ -5387,29 +5386,64 @@ def daily_renewal_job():
         log.error("expiry notifications failed: %s", type(e).__name__)
 
 
-# Build (but don't start) the scheduler at import time. It's started in
-# __main__ only, so gunicorn/WSGI imports don't launch duplicate jobs — for
-# multi-worker production, run the scheduler in a single dedicated worker
-# or use the standalone-script variant instead.
-scheduler = None
-if _SCHEDULER_AVAILABLE:
-    scheduler = BackgroundScheduler(daemon=True)
-    # 08:07 local — off the top of the hour, after any overnight DB events.
-    scheduler.add_job(daily_renewal_job, CronTrigger(hour=8, minute=7),
-                      id='daily_renewals', replace_existing=True)
+# ── Scheduler thread ────────────────────────────────────────────────────
+# A single daemon thread per process that sleeps until the next 08:07 local
+# and fires daily_renewal_job(). Started at import time (not in __main__) so
+# gunicorn/WSGI deployments also run it — the previous __main__-only start
+# never fired under WSGI. The Werkzeug reloader guard keeps it to one thread
+# in debug mode. Multi-worker safety comes from the renewal_reminders +
+# notification dedupe, not from the scheduler itself.
+_scheduler_started = False
+
+
+def _seconds_until_daily_job():
+    """Seconds from now until the next 08:07 local time."""
+    now = datetime.now()
+    target = now.replace(hour=DAILY_JOB_HOUR, minute=DAILY_JOB_MINUTE,
+                         second=0, microsecond=0)
+    if now >= target:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+def _daily_scheduler_loop():
+    while True:
+        try:
+            time.sleep(_seconds_until_daily_job())
+            daily_renewal_job()
+        except Exception as e:
+            # Never let the loop die — log and back off so a persistent
+            # error doesn't spin into a tight CPU loop.
+            log.error("daily renewal scheduler loop error: %s", type(e).__name__)
+            time.sleep(60)
+
+
+def _start_daily_scheduler():
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    _scheduler_started = True
+    t = threading.Thread(target=_daily_scheduler_loop, daemon=True,
+                         name="daily_renewal_scheduler")
+    t.start()
+    log.info("Renewal reminder scheduler started (daily at %02d:%02d local).",
+             DAILY_JOB_HOUR, DAILY_JOB_MINUTE)
+
+
+# Start the scheduler once per process at import time. In Flask debug mode
+# the reloader imports this module in both the parent and child; the parent
+# has no WERKZEUG_RUN_MAIN, so we skip it there and start only in the child
+# (the process that actually serves). Production (DEBUG_MODE off) always starts.
+if not DEBUG_MODE or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    try:
+        _start_daily_scheduler()
+    except Exception as e:
+        log.error("Could not start renewal scheduler: %s", type(e).__name__)
 
 
 if __name__ == '__main__':
     if IS_PRODUCTION:
         log.warning("Running via `python app.py` in a production environment is not "
                     "recommended — use a WSGI server (gunicorn/uwsgi) behind a reverse proxy instead.")
-    # Start the scheduler once, in the main reloader process only, so Flask
-    # debug mode doesn't register the job twice.
-    if scheduler is not None and (not DEBUG_MODE or os.environ.get('WERKZEUG_RUN_MAIN') == 'true'):
-        try:
-            scheduler.start()
-            log.info("Renewal reminder scheduler started (daily at 08:07).")
-        except Exception as e:
-            log.error("Could not start scheduler: %s", type(e).__name__)
     app.run(debug=DEBUG_MODE, host=os.environ.get('HOST', '127.0.0.1'),
             port=int(os.environ.get('PORT', 8080)))

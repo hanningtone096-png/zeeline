@@ -13,6 +13,3 @@ python-dotenv
 # Added for performance/scalability improvements
 Flask-Limiter          # rate limiting
 redis                  # caching (app runs fine without a Redis server too)
-
-# Added for renewal-reminder automation
-APScheduler            # in-process daily job (expiry reminders + notifications)
