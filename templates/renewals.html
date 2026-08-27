@@ -83,6 +83,7 @@
         <i class="fas fa-bars"></i>
     </button>
     <span class="brand">WESTLAKE</span>
+    <button class="notif-bell" type="button" aria-label="Notifications"><i class="fas fa-bell"></i><span class="notif-badge">0</span></button>
     <button class="logout-btn" onclick="logout()" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
         <i class="fas fa-sign-out-alt"></i>
     </button>
@@ -102,13 +103,17 @@
         <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
         <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
         <li class="active"><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li><a href="/commissions"><i class="fas fa-percentage"></i> Commissions</a></li>
     </ul>
 </nav>
 
 <main class="main-content">
 <header class="top-header">
     <h1>Policy Renewals Tracking</h1>
-    <button class="logout-btn" onclick="logout()">Logout</button>
+    <div style="display:flex;align-items:center;gap:10px;">
+        {% include '_notifications.html' %}
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
 </header>
 
 <!-- Summary pills -->

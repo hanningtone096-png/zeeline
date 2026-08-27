@@ -461,6 +461,32 @@ def notify_new_agent(full_name, username, email):
     send_email(COMPANY_EMAIL, "New Agent Registration", html)
 
 
+def push_notification(ntype, title, message, link=None, user_id=None, *, email_admin=False):
+    """Insert one in-app notification row.
+
+    user_id=None creates an admin-only notification (only admins see it);
+    user_id=<agent id> creates an agent-scoped notification that admins also
+    see (admins query all rows). When email_admin=True, a copy is emailed to
+    the company/admin mailbox via send_email — used for admin-scoped events
+    per the "in-app + email to admin" delivery decision.
+    """
+    try:
+        query("""INSERT INTO notifications (user_id, type, title, message, link)
+                 VALUES (%s,%s,%s,%s,%s)""",
+              (user_id, ntype, title, message, link), commit=True)
+    except Exception as e:
+        log.error("push_notification insert failed: %s", type(e).__name__)
+        return
+    if email_admin and COMPANY_EMAIL:
+        try:
+            send_email(COMPANY_EMAIL, title,
+                       f"<p>{message}</p>"
+                       f"<p style='color:#64748b;font-size:12px'>"
+                       f"Open the dashboard and click the bell icon to view.</p>")
+        except Exception:
+            pass
+
+
 def notify_quotation(agent, client, vehicle, insurance, quote, pdf_bytes=None):
     html = f"""
     <h2>New Quotation Generated — {quote['id']}</h2>
@@ -2644,6 +2670,7 @@ init_payments(
     monarch_policy_class=monarch_policy_class,
     next_monarch_policy_no=next_monarch_policy_no,
     notify_underpayment_attempt=notify_underpayment_attempt,
+    push_notification=push_notification,
 )
 
 
@@ -3253,6 +3280,17 @@ def api_verify_email():
     enqueue("notify_new_agent", notify_new_agent,
             user['full_name'], user['username'], user['email'])
 
+    # In-app notification for the admin's bell dropdown. notify_new_agent
+    # (above) already emails the admin, so email_admin=False here to avoid a
+    # duplicate copy. user_id=NULL scopes it to admins only.
+    push_notification(
+        'agent_pending',
+        'New agent awaiting approval',
+        f"{user['full_name']} ({user['username']}) verified their email and is pending approval.",
+        link='/admin/agents?status=pending',
+        user_id=None,
+    )
+
     session.pop('unverified_user_id', None)
 
     return jsonify({
@@ -3425,6 +3463,67 @@ def dashboard_stats():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# NOTIFICATIONS (header bell)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/notifications')
+@login_required
+def get_notifications():
+    """Return up to 50 notifications for the caller, newest first, plus the
+    unread count. Admins see every row; agents see only their own (user_id).
+    Not cached — notifications are per-user and change on demand."""
+    role = session.get('role')
+    uid  = session.get('user_id')
+    try:
+        if role == 'admin':
+            rows = query("""SELECT id, user_id, type, title, message, link,
+                                   is_read, created_at
+                            FROM notifications
+                            ORDER BY created_at DESC
+                            LIMIT 50""")
+        else:
+            rows = query("""SELECT id, user_id, type, title, message, link,
+                                   is_read, created_at
+                            FROM notifications
+                            WHERE user_id=%s
+                            ORDER BY created_at DESC
+                            LIMIT 50""", (uid,))
+        unread = sum(1 for r in rows if not r['is_read'])
+        return jsonify({"items": rows, "unread_count": unread})
+    except Exception as e:
+        return safe_error_response(e, "Could not load notifications.")
+
+
+@app.route('/api/notifications/read', methods=['POST'])
+@login_required
+def read_notifications():
+    """Mark one notification (if `id` given) or all of the caller's
+    notifications as read. Agents are scoped to their own rows; admins can
+    mark any/all rows."""
+    d    = request.get_json() or {}
+    nid  = d.get('id')
+    role = session.get('role')
+    uid  = session.get('user_id')
+    try:
+        if nid:
+            if role == 'admin':
+                query("UPDATE notifications SET is_read=TRUE WHERE id=%s",
+                      (nid,), commit=True)
+            else:
+                query("UPDATE notifications SET is_read=TRUE WHERE id=%s AND user_id=%s",
+                      (nid, uid), commit=True)
+        else:
+            if role == 'admin':
+                query("UPDATE notifications SET is_read=TRUE", commit=True)
+            else:
+                query("UPDATE notifications SET is_read=TRUE WHERE user_id=%s",
+                      (uid,), commit=True)
+        return jsonify({"success": True})
+    except Exception as e:
+        return safe_error_response(e, "Could not update notifications.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ADMIN — AGENTS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -3493,7 +3592,7 @@ def update_agent_status(agent_id):
     query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
           (session['user_id'], 'agent_status_change',
            f"agent_id={agent_id} status={status}"), commit=True)
-    _cache_delete_prefix("cache:dashboard")
+    cache_delete_prefix("cache:dashboard")
     return jsonify({"success": True})
 
 
@@ -3620,6 +3719,76 @@ def add_client():
 
     cache_delete_prefix("cache:dashboard")
     return jsonify({"success": True, "client_id": cid})
+
+
+def _client_or_403(client_id):
+    """Return (client_row, None) if the caller may see the client, else
+    (None, (response, status)). Agents are scoped to their own clients."""
+    client = query("""SELECT c.*, u.full_name AS agent_name
+                      FROM clients c
+                      LEFT JOIN users u ON u.id = c.agent_id
+                      WHERE c.id=%s""", (client_id,), fetchone=True)
+    if not client:
+        return None, (jsonify({"error": "Client not found"}), 404)
+    if session['role'] != 'admin' and client['agent_id'] != session['user_id']:
+        return None, (jsonify({"error": "You do not have access to this client"}), 403)
+    return client, None
+
+
+@app.route('/clients/<int:client_id>')
+@login_required
+def client_360_page(client_id):
+    _client, err = _client_or_403(client_id)
+    if err:
+        return err
+    return render_template('client_360.html', client_id=client_id)
+
+
+@app.route('/api/clients/<int:client_id>/360')
+@login_required
+def client_360_api(client_id):
+    client, err = _client_or_403(client_id)
+    if err:
+        return err
+
+    def ser(v):
+        if isinstance(v, (datetime, date)):
+            return v.isoformat()
+        return v
+    def ser_rows(rows):
+        return [{k: ser(v) for k, v in dict(r).items()} for r in rows]
+
+    policies = query("""SELECT p.id, p.policy_no, p.vehicle_reg, p.type_of_cover,
+                               p.commencing_date, p.expiry_date, p.total_payable,
+                               p.status, p.created_at
+                        FROM policies p
+                        WHERE p.client_id=%s
+                        ORDER BY p.commencing_date DESC, p.created_at DESC""",
+                     (client_id,))
+    claims = query("""SELECT cl.id, cl.claim_policy, cl.incident_date,
+                            cl.incident_type, cl.status, cl.created_at
+                     FROM claims cl
+                     JOIN policies p ON p.policy_no = cl.claim_policy
+                     WHERE p.client_id=%s
+                     ORDER BY cl.created_at DESC""", (client_id,))
+    payments = query("""SELECT pay.id, pay.policy_no, pay.amount, pay.status,
+                               pay.method, pay.reference, pay.paid_at, pay.created_at
+                        FROM payments pay
+                        JOIN policies p ON p.policy_no = pay.policy_no
+                        WHERE p.client_id=%s
+                        ORDER BY pay.created_at DESC""", (client_id,))
+    documents = query("""SELECT id, filename, filepath, doc_type, created_at
+                         FROM documents
+                         WHERE client_id=%s
+                         ORDER BY created_at DESC""", (client_id,))
+
+    return jsonify({
+        "client":    ser_rows([client])[0],
+        "policies":  ser_rows(policies),
+        "claims":    ser_rows(claims),
+        "payments":  ser_rows(payments),
+        "documents": ser_rows(documents),
+    })
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4524,10 +4693,200 @@ def renew_policy():
            f"policy_id={pid} policy_no={p.get('policy_no')} "
            f"old_expiry={old_expiry} new_expiry={new_expiry}"), commit=True)
 
-    _cache_delete_prefix("cache:dashboard")
-    _cache_delete_prefix("cache:reports_summary")
+    cache_delete_prefix("cache:dashboard")
+    cache_delete_prefix("cache:reports_summary")
 
     return jsonify({"success": True, "new_expiry": str(new_expiry)})
+
+
+@app.route('/api/admin/renewals/run-job', methods=['POST'])
+@login_required
+@admin_required
+def run_renewal_job_now():
+    """Manually fire the daily renewal job (emails + expiry notifications)
+    on demand, so it can be tested without waiting for the 08:07 cron tick.
+    Idempotent: the renewal_reminders dedupe and the notification dedupe
+    make a re-run a no-op for anything already sent today."""
+    try:
+        daily_renewal_job()
+    except Exception as e:
+        return safe_error_response(e, "Renewal job failed.")
+    return jsonify({"success": True,
+                    "message": "Renewal job executed. Check renewal_reminders and notifications."})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMISSIONS (flat % of collected premium)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_commission_rate():
+    """Flat commission rate as a float percent (default 10), from app_settings."""
+    row = query("SELECT value FROM app_settings WHERE `key`=%s",
+                ('commission_rate_percent',), fetchone=True)
+    try:
+        return float(row['value']) if row else 10.0
+    except (TypeError, ValueError):
+        return 10.0
+
+
+def _current_period_bounds(period):
+    """Return (start, end) datetime strings for the agent's current payout
+    period (daily / weekly / monthly). Weekly starts Monday."""
+    today = date.today()
+    if period == 'daily':
+        start, end = today, today
+    elif period == 'weekly':
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+    else:  # monthly
+        start = today.replace(day=1)
+        nxt = today.replace(month=today.month % 12 + 1, day=1)
+        if today.month == 12:
+            nxt = today.replace(year=today.year + 1, month=1, day=1)
+        end = nxt - timedelta(days=1)
+    s = datetime.combine(start, datetime.min.time())
+    e = datetime.combine(end, datetime.max.time())
+    return s.strftime('%Y-%m-%d %H:%M:%S'), e.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _agent_commission_summary(agent_id, rate):
+    """Lifetime earned, paid-out, pending, and per-active-policy breakdown.
+    Earned = total_payable * rate/100 for the agent's ACTIVE policies."""
+    def _iso(d):
+        try:
+            return _policy_date(d).isoformat()
+        except (ValueError, TypeError):
+            return None
+
+    rows = query("""SELECT p.policy_no, p.total_payable, p.commencing_date,
+                           p.expiry_date, p.created_at,
+                           CONCAT(c.first_name,' ',c.last_name) AS client_name
+                    FROM policies p
+                    LEFT JOIN clients c ON c.id = p.client_id
+                    WHERE p.agent_id=%s AND p.status='active'
+                    ORDER BY p.created_at DESC""", (agent_id,))
+    policies, lifetime = [], 0.0
+    for r in rows:
+        commission = round(float(r['total_payable'] or 0) * rate / 100.0, 2)
+        lifetime += commission
+        policies.append({
+            'policy_no':     r['policy_no'],
+            'client_name':   r.get('client_name'),
+            'premium':       float(r['total_payable'] or 0),
+            'commission':    commission,
+            'commencing_date': _iso(r.get('commencing_date')),
+            'expiry_date':     _iso(r.get('expiry_date')),
+        })
+    paid_row = query("""SELECT COALESCE(SUM(amount),0) AS paid
+                        FROM commission_payouts
+                        WHERE agent_id=%s AND status='paid'""",
+                     (agent_id,), fetchone=True) or {}
+    paid_out = round(float(paid_row.get('paid', 0) or 0), 2)
+    payouts = query("""SELECT id, period_start, period_end, amount, status,
+                              paid_at, created_at
+                       FROM commission_payouts WHERE agent_id=%s
+                       ORDER BY COALESCE(paid_at, created_at) DESC""",
+                    (agent_id,))
+    return {
+        'lifetime_earned': round(lifetime, 2),
+        'paid_out':        paid_out,
+        'pending_payout':  round(lifetime - paid_out, 2),
+        'policies':        policies,
+        'payouts':         payouts,
+    }
+
+
+@app.route('/commissions')
+@login_required
+def commissions_page():
+    return render_template('commissions.html')
+
+
+@app.route('/api/commissions')
+@login_required
+def commissions_api():
+    rate = get_commission_rate()
+    if session['role'] == 'admin':
+        agents = query("""SELECT u.id, u.full_name, u.commission_payout
+                          FROM users u
+                          WHERE u.role='agent'
+                          ORDER BY u.full_name""")
+        out = []
+        for a in agents:
+            s = _agent_commission_summary(a['id'], rate)
+            out.append({
+                'id':              a['id'],
+                'name':            a['full_name'],
+                'payout_period':   a.get('commission_payout') or 'monthly',
+                'lifetime_earned': s['lifetime_earned'],
+                'paid_out':        s['paid_out'],
+                'pending_payout':  s['pending_payout'],
+            })
+        return jsonify({"rate": rate, "agents": out})
+    # Agent: own commission, plus earned-this-period for their payout cadence.
+    me = query("SELECT commission_payout FROM users WHERE id=%s",
+               (session['user_id'],), fetchone=True) or {}
+    period = (me.get('commission_payout') or 'monthly')
+    s = _agent_commission_summary(session['user_id'], rate)
+    start, end = _current_period_bounds(period)
+    erow = query("""SELECT COALESCE(SUM(total_payable),0) AS base
+                    FROM policies
+                    WHERE agent_id=%s AND status='active'
+                      AND created_at BETWEEN %s AND %s""",
+                 (session['user_id'], start, end), fetchone=True) or {}
+    earned_this_period = round(float(erow.get('base', 0) or 0) * rate / 100.0, 2)
+    return jsonify({"rate": rate, "payout_period": period,
+                    "earned_this_period": earned_this_period, **s})
+
+
+@app.route('/api/admin/commissions/rate', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def commission_rate_setting():
+    if request.method == 'GET':
+        return jsonify({"rate": get_commission_rate()})
+    d = request.get_json() or {}
+    try:
+        rate = round(float(d.get('rate')), 2)
+    except (TypeError, ValueError):
+        return jsonify({"error": "rate must be a number"}), 400
+    if not (0 < rate <= 100):
+        return jsonify({"error": "rate must be between 0 and 100"}), 400
+    query("""INSERT INTO app_settings (`key`, `value`) VALUES ('commission_rate_percent', %s)
+             ON DUPLICATE KEY UPDATE value=%s""", (str(rate), str(rate)), commit=True)
+    return jsonify({"success": True, "rate": rate})
+
+
+@app.route('/api/admin/commissions/payouts', methods=['POST'])
+@login_required
+@admin_required
+def create_commission_payout():
+    """Record a commission payout for an agent as paid (creating the payout
+    record and stamping paid_at)."""
+    d          = request.get_json() or {}
+    agent_id   = d.get('agent_id')
+    period_start = (d.get('period_start') or '').strip()
+    period_end   = (d.get('period_end') or '').strip()
+    try:
+        amount = round(float(d.get('amount')), 2)
+    except (TypeError, ValueError):
+        return jsonify({"error": "amount must be a number"}), 400
+    if not agent_id or not period_start or not period_end:
+        return jsonify({"error": "agent_id, period_start and period_end are required"}), 400
+    if amount <= 0:
+        return jsonify({"error": "amount must be greater than zero"}), 400
+    agent = query("SELECT id FROM users WHERE id=%s AND role='agent'",
+                  (agent_id,), fetchone=True)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    pid = query("""INSERT INTO commission_payouts
+                   (agent_id, period_start, period_end, amount, status, paid_at, created_by)
+                   VALUES (%s,%s,%s,%s,'paid',NOW(),%s)""",
+                (agent_id, period_start, period_end, amount, session['user_id']), commit=True)
+    query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+          (session['user_id'], 'commission_payout',
+           f"agent={agent_id} amount={amount} period={period_start}..{period_end}"), commit=True)
+    return jsonify({"success": True, "id": pid})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4753,12 +5112,166 @@ def record_dmvic_policy_alert():
     query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
           (session['user_id'], 'dmvic_record_policy_alert',
            f"policy={policy_no} issuance_request_id={issuance_request_id}"), commit=True)
+
+    # Bell notification: admin (emailed) + the owning agent (in-app only).
+    pol_owner = query("SELECT agent_id FROM policies WHERE policy_no=%s",
+                      (policy_no,), fetchone=True)
+    agent_id  = pol_owner.get('agent_id') if pol_owner else None
+    push_notification(
+        'dmvic_flag', 'DMVIC policy alert flagged',
+        f"Policy {policy_no} flagged for manual review.",
+        link=f'/renewals?policy={policy_no}', user_id=None, email_admin=True)
+    if agent_id:
+        push_notification(
+            'dmvic_flag', 'DMVIC policy alert flagged',
+            f"Your policy {policy_no} was flagged for manual review.",
+            link=f'/renewals?policy={policy_no}', user_id=agent_id)
+
     return jsonify({"success": True, "message": "DMVIC alert recorded for data review; no manual confirmation request was sent."})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RENEWAL REMINDER SCHEDULER (APScheduler, in-process)
+#
+# Runs daily and (a) emails renewal reminders to the client + agent for
+# policies expiring in exactly 30/14/3 days, logging each send in
+# renewal_reminders so an interval is never double-sent, and (b) creates
+# in-app policy_expiring bell notifications at 7/3/1 days. Email goes via
+# the existing Brevo/SMTP send_email path. APScheduler is optional: if it
+# isn't installed the app still runs, just without the daily job.
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    _SCHEDULER_AVAILABLE = True
+except ImportError:
+    _SCHEDULER_AVAILABLE = False
+    log.warning("APScheduler not installed — renewal reminders disabled. "
+                "Run `pip install APScheduler` to enable them.")
+
+REMINDER_INTERVALS = (30, 14, 3)   # email reminders, days before expiry
+NOTIFY_INTERVALS   = (7, 3, 1)     # in-app bell notifications, days before expiry
+
+
+def _send_renewal_reminder(policy_no, days, recipient, recipient_name):
+    """Email one recipient a renewal reminder and log it. Returns True if a
+    reminder was (newly) sent. Dedupe is per (policy_no, interval, recipient):
+    if a row already exists in renewal_reminders we skip, so re-running the
+    job the same day or a duplicated scheduler never double-sends."""
+    interval = f"{days}d"
+    existing = query("""SELECT id FROM renewal_reminders
+                        WHERE policy_no=%s AND interval_type=%s AND recipient=%s""",
+                     (policy_no, interval, recipient), fetchone=True)
+    if existing:
+        return False
+    subject = f"Policy renewal reminder — {policy_no} (expires in {days} days)"
+    html = (f"<p>Dear {recipient_name},</p>"
+            f"<p>Your insurance policy <b>{policy_no}</b> expires in "
+            f"<b>{days} days</b>. Please renew promptly to stay covered.</p>"
+            f"<p>Contact Zee Line Risk Solutions to arrange your renewal.</p>"
+            f"<p style='color:#64748b;font-size:12px'>— Westlake Insurance</p>")
+    sent = send_email(recipient, subject, html)
+    if sent:
+        query("""INSERT INTO renewal_reminders
+                 (policy_no, recipient, channel, interval_type, sent_at)
+                 VALUES (%s,%s,'email',%s,NOW())""",
+              (policy_no, recipient, interval), commit=True)
+    else:
+        log.warning("Renewal reminder email failed for %s -> %s", policy_no, recipient)
+    return sent
+
+
+def _run_renewal_reminders():
+    """Email reminders at 30/14/3 days to client + agent."""
+    placeholders = ",".join(["%s"] * len(REMINDER_INTERVALS))
+    rows = query(f"""
+        SELECT p.policy_no,
+               c.email AS client_email,
+               CONCAT(c.first_name,' ',c.last_name) AS client_name,
+               u.email AS agent_email,
+               u.full_name AS agent_name,
+               DATEDIFF(p.expiry_date, CURDATE()) AS days_left
+        FROM   policies p
+        LEFT JOIN clients c ON c.id = p.client_id
+        LEFT JOIN users   u ON u.id = p.agent_id
+        WHERE  p.status='active'
+          AND  DATEDIFF(p.expiry_date, CURDATE()) IN ({placeholders})
+    """, tuple(REMINDER_INTERVALS))
+    for r in rows:
+        days = int(r['days_left'])
+        if r.get('client_email'):
+            _send_renewal_reminder(r['policy_no'], days,
+                                   r['client_email'], r.get('client_name') or 'Client')
+        if r.get('agent_email'):
+            _send_renewal_reminder(r['policy_no'], days,
+                                   r['agent_email'], r.get('agent_name') or 'Agent')
+
+
+def _run_expiry_notifications():
+    """In-app policy_expiring bell notifications at 7/3/1 days (admin + agent).
+    One per policy per day — deduped by link+today so a re-run is a no-op."""
+    placeholders = ",".join(["%s"] * len(NOTIFY_INTERVALS))
+    rows = query(f"""
+        SELECT p.policy_no, p.agent_id,
+               DATEDIFF(p.expiry_date, CURDATE()) AS days_left
+        FROM   policies p
+        WHERE  p.status='active'
+          AND  DATEDIFF(p.expiry_date, CURDATE()) IN ({placeholders})
+    """, tuple(NOTIFY_INTERVALS))
+    for r in rows:
+        days = int(r['days_left'])
+        link = f"/renewals?policy={r['policy_no']}"
+        already = query("""SELECT id FROM notifications
+                            WHERE type='policy_expiring' AND link=%s
+                              AND DATE(created_at)=CURDATE()""",
+                        (link,), fetchone=True)
+        if already:
+            continue
+        msg = f"Policy {r['policy_no']} expires in {days} day{'s' if days != 1 else ''}."
+        push_notification('policy_expiring', 'Policy expiring soon', msg,
+                          link=link, user_id=None)
+        if r.get('agent_id'):
+            push_notification('policy_expiring', 'Policy expiring soon', msg,
+                              link=link, user_id=r['agent_id'])
+
+
+def daily_renewal_job():
+    """APScheduler entry point. Wrapped so one failing step doesn't kill the
+    scheduler thread for future runs."""
+    try:
+        _run_renewal_reminders()
+    except Exception as e:
+        log.error("renewal reminders failed: %s", type(e).__name__)
+    try:
+        _run_expiry_notifications()
+    except Exception as e:
+        log.error("expiry notifications failed: %s", type(e).__name__)
+
+
+# Build (but don't start) the scheduler at import time. It's started in
+# __main__ only, so gunicorn/WSGI imports don't launch duplicate jobs — for
+# multi-worker production, run the scheduler in a single dedicated worker
+# or use the standalone-script variant instead.
+scheduler = None
+if _SCHEDULER_AVAILABLE:
+    scheduler = BackgroundScheduler(daemon=True)
+    # 08:07 local — off the top of the hour, after any overnight DB events.
+    scheduler.add_job(daily_renewal_job, CronTrigger(hour=8, minute=7),
+                      id='daily_renewals', replace_existing=True)
 
 
 if __name__ == '__main__':
     if IS_PRODUCTION:
         log.warning("Running via `python app.py` in a production environment is not "
                     "recommended — use a WSGI server (gunicorn/uwsgi) behind a reverse proxy instead.")
+    # Start the scheduler once, in the main reloader process only, so Flask
+    # debug mode doesn't register the job twice.
+    if scheduler is not None and (not DEBUG_MODE or os.environ.get('WERKZEUG_RUN_MAIN') == 'true'):
+        try:
+            scheduler.start()
+            log.info("Renewal reminder scheduler started (daily at 08:07).")
+        except Exception as e:
+            log.error("Could not start scheduler: %s", type(e).__name__)
     app.run(debug=DEBUG_MODE, host=os.environ.get('HOST', '127.0.0.1'),
             port=int(os.environ.get('PORT', 8080)))

@@ -1,0 +1,164 @@
+{# Notification bell + dropdown. Include once per page inside the desktop
+   top-header. A bare <button class="notif-bell"> may also live in the page's
+   mobile-topbar; the script below wires every .notif-bell on the page and
+   positions the single dropdown under whichever one was clicked. #}
+<div class="notif-wrap" style="position:relative;">
+    <button class="notif-bell" type="button" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
+        <i class="fas fa-bell"></i>
+        <span class="notif-badge" data-count="0">0</span>
+    </button>
+</div>
+
+<div id="notifDropdown" class="notif-dropdown" role="menu" aria-label="Notifications" hidden>
+    <div class="notif-dropdown-head">
+        <strong>Notifications</strong>
+        <button type="button" class="notif-markall" id="notifMarkAll">Mark all read</button>
+    </div>
+    <div class="notif-dropdown-body" id="notifList">
+        <div class="notif-empty">No notifications</div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // Only the first include on a page should run the controller; a second
+    // include (e.g. a mobile variant) would duplicate the dropdown/script.
+    if (window.__notifInit) return;
+    window.__notifInit = true;
+
+    var CSRF = document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').content || '';
+    var dropdown = document.getElementById('notifDropdown');
+    var listEl   = document.getElementById('notifList');
+    var markAll  = document.getElementById('notifMarkAll');
+    var openBell = null;
+
+    // Re-parent the dropdown to <body> so it is never trapped inside a
+    // display:none header (the desktop top-header is hidden on mobile).
+    if (dropdown && dropdown.parentNode !== document.body) {
+        document.body.appendChild(dropdown);
+    }
+
+    var ICONS = {
+        agent_pending:   'fas fa-user-clock',
+        dmvic_flag:      'fas fa-exclamation-triangle',
+        policy_expiring: 'fas fa-sync-alt',
+        mpesa_failed:    'fas fa-times-circle'
+    };
+    var ICON_BG = {
+        agent_pending:   '#eff6ff', dmvic_flag:      '#fffbeb',
+        policy_expiring: '#f0fdf4', mpesa_failed:    '#fef2f2'
+    };
+    var ICON_FG = {
+        agent_pending:   '#2563eb', dmvic_flag:      '#f59e0b',
+        policy_expiring: '#10b981', mpesa_failed:    '#ef4444'
+    };
+
+    function fmtAgo(iso) {
+        if (!iso) return '';
+        var d = new Date(iso.replace(' ', 'T') + 'Z'), now = Date.now();
+        var s = Math.max(1, Math.floor((now - d.getTime()) / 1000));
+        if (s < 60)   return s + 's ago';
+        if (s < 3600) return Math.floor(s / 60) + 'm ago';
+        if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+        return Math.floor(s / 86400) + 'd ago';
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function render(items, unread) {
+        // Update every badge on the page (desktop + mobile bells).
+        document.querySelectorAll('.notif-badge').forEach(function (b) {
+            b.textContent = unread;
+            b.dataset.count = unread;
+            b.style.display = unread > 0 ? '' : 'none';
+        });
+        if (!items || !items.length) {
+            listEl.innerHTML = '<div class="notif-empty">No notifications</div>';
+            return;
+        }
+        listEl.innerHTML = items.map(function (n) {
+            var ic = ICONS[n.type] || 'fas fa-bell';
+            var href = n.link ? (' href="' + escapeHtml(n.link) + '"') : '';
+            return '<a class="notif-item' + (n.is_read ? '' : ' unread') + '"' + href + ' data-id="' + n.id + '">' +
+                '<span class="notif-ic" style="background:' + (ICON_BG[n.type] || '#f1f5f9') + ';color:' + (ICON_FG[n.type] || '#64748b') + '"><i class="' + ic + '"></i></span>' +
+                '<span class="notif-body">' +
+                  '<span class="notif-title">' + escapeHtml(n.title) + '</span>' +
+                  '<span class="notif-msg">' + escapeHtml(n.message) + '</span>' +
+                  '<span class="notif-time">' + fmtAgo(n.created_at) + '</span>' +
+                '</span>' +
+              '</a>';
+        }).join('');
+    }
+
+    function load() {
+        fetch('/api/notifications', { headers: { 'X-CSRFToken': CSRF } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) render(d.items, d.unread_count); })
+            .catch(function () {});
+    }
+
+    function markRead(id) {
+        fetch('/api/notifications/read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify({ id: id || undefined })
+        }).then(function () { load(); }).catch(function () {});
+    }
+
+    function positionDropdown(bell) {
+        var r = bell.getBoundingClientRect();
+        var dd = dropdown;
+        dd.style.minWidth = '320px';
+        dd.style.left = 'auto';
+        dd.style.right = (window.innerWidth - r.right - 8) + 'px';
+        // Keep the dropdown on-screen on small viewports.
+        dd.style.maxWidth = (window.innerWidth - 16) + 'px';
+        var top = r.bottom + 8;
+        dd.style.top = top + 'px';
+    }
+
+    function toggle(bell) {
+        var willOpen = dropdown.hidden;
+        close();
+        if (willOpen) {
+            openBell = bell;
+            positionDropdown(bell);
+            dropdown.hidden = false;
+            bell.setAttribute('aria-expanded', 'true');
+        }
+    }
+    function close() {
+        if (dropdown.hidden) return;
+        dropdown.hidden = true;
+        if (openBell) openBell.setAttribute('aria-expanded', 'false');
+        openBell = null;
+    }
+
+    // Wire every bell present now (desktop + mobile) and any added later.
+    document.addEventListener('click', function (e) {
+        var bell = e.target.closest('.notif-bell');
+        if (bell) { e.preventDefault(); e.stopPropagation(); toggle(bell); return; }
+        if (!dropdown.hidden && !dropdown.contains(e.target)) close();
+    });
+    // Mark an item read on click (navigation still happens via the anchor).
+    listEl.addEventListener('click', function (e) {
+        var item = e.target.closest('.notif-item');
+        if (item && item.dataset.id) markRead(item.dataset.id);
+    });
+    markAll.addEventListener('click', function (e) {
+        e.stopPropagation();
+        markRead(null);
+    });
+    window.addEventListener('scroll', function () { if (!dropdown.hidden && openBell) positionDropdown(openBell); }, { passive: true });
+    window.addEventListener('resize', function () { if (!dropdown.hidden && openBell) positionDropdown(openBell); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+
+    // Initial load + periodic refresh while the page is open.
+    load();
+    setInterval(load, 45000);
+})();
+</script>

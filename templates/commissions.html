@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>WESTLAKE INSURANCE - Commissions</title>
+<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+.kpi-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:22px; }
+@media(max-width:760px){ .kpi-grid { grid-template-columns:1fr; } }
+.kpi-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:18px 20px; }
+.kpi-card .label { font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:.04em; }
+.kpi-card .value { font-size:26px; font-weight:800; color:#0f172a; margin-top:6px; }
+.kpi-card .sub   { font-size:12px; color:#94a3b8; margin-top:4px; }
+.kpi-card.amber .value { color:#b45309; }
+.kpi-card.green .value { color:#15803d; }
+.kpi-card.blue  .value { color:#1d4ed8; }
+
+.panel { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:22px; }
+.panel h3 { font-size:15px; font-weight:700; color:#0f172a; margin:0 0 14px; }
+
+.tbl { width:100%; border-collapse:collapse; font-size:14px; }
+.tbl th { padding:10px 12px; text-align:left; background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid #e2e8f0; }
+.tbl td { padding:10px 12px; border-bottom:1px solid #f1f5f9; }
+.tbl-wrap { overflow-x:auto; }
+.muted { color:#94a3b8; font-size:13px; }
+
+.rate-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+.rate-row input { padding:9px 12px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px; width:120px; }
+.form-inline { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:14px; }
+.form-inline label { font-size:12px; color:#64748b; display:block; margin-bottom:4px; }
+.form-inline input, .form-inline select { padding:9px 12px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px; }
+.form-inline .field { display:flex; flex-direction:column; }
+.badge-paid    { background:#dcfce7; color:#166534; padding:3px 10px; border-radius:99px; font-size:12px; font-weight:600; }
+.badge-pending { background:#fef9c3; color:#854d0e; padding:3px 10px; border-radius:99px; font-size:12px; font-weight:600; }
+.btn-tiny { padding:7px 14px; border:none; border-radius:8px; background:var(--brand-blue,#2563eb); color:#fff; font-size:13px; font-weight:600; cursor:pointer; }
+.btn-tiny:hover { opacity:.92; }
+</style>
+</head>
+<body>
+
+<!-- ── Mobile top bar ── -->
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="openSidebar()" aria-label="Open menu">
+        <i class="fas fa-bars"></i>
+    </button>
+    <span class="brand">WESTLAKE</span>
+    <button class="notif-bell" type="button" aria-label="Notifications"><i class="fas fa-bell"></i><span class="notif-badge">0</span></button>
+    <button class="logout-btn" onclick="logout()" aria-label="Logout" style="padding:6px 12px; font-size:12px; background:#1e293b; border:1px solid #334155;">
+        <i class="fas fa-sign-out-alt"></i>
+    </button>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<div class="app-container">
+
+<nav class="sidebar">
+    <div class="logo"><img src="/css/images/westlake_logo.png" alt="Westlake" style="height:32px;width:auto;border-radius:4px;"><button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu"><i class="fas fa-times"></i></button></div>
+    <ul class="nav-links">
+        <li><a href="/dashboard"><i class="fas fa-chart-line"></i> Dashboard</a></li>
+        {% if session['role'] == 'admin' %}
+        <li><a href="/admin/agents"><i class="fas fa-users-cog"></i> Agents</a></li>
+        {% endif %}
+        <li><a href="/quotation"><i class="fas fa-file-invoice-dollar"></i> New Quotation</a></li>
+        <li><a href="/clients"><i class="fas fa-users"></i> Client Portfolio</a></li>
+        <li><a href="/claims"><i class="fas fa-hand-holding-usd"></i> Claims</a></li>
+        <li><a href="/renewals"><i class="fas fa-sync"></i> Renewals</a></li>
+        <li class="active"><a href="/commissions"><i class="fas fa-percentage"></i> Commissions</a></li>
+    </ul>
+</nav>
+
+<main class="main-content">
+<header class="top-header">
+    <h1>Commissions</h1>
+    <div style="display:flex;align-items:center;gap:10px;">
+        {% include '_notifications.html' %}
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+</header>
+
+<div id="page_error" style="display:none; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; border-radius:8px; padding:12px 16px; margin-bottom:20px; font-size:14px;"></div>
+
+<!-- ════════════════ AGENT VIEW ════════════════ -->
+<div id="agentView" style="display:none;">
+    <div class="kpi-grid">
+        <div class="kpi-card blue">
+            <div class="label">Earned this <span id="periodLabel">period</span></div>
+            <div class="value" id="kpiEarnedPeriod">KES 0</div>
+            <div class="sub">Active policies, current payout period</div>
+        </div>
+        <div class="kpi-card amber">
+            <div class="label">Pending payout</div>
+            <div class="value" id="kpiPending">KES 0</div>
+            <div class="sub">Earned not yet disbursed</div>
+        </div>
+        <div class="kpi-card green">
+            <div class="label">Lifetime earned</div>
+            <div class="value" id="kpiLifetime">KES 0</div>
+            <div class="sub" id="kpiRate">at 0% commission</div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3><i class="fas fa-file-invoice" style="color:#2563eb;"></i> Commission per policy</h3>
+        <div class="tbl-wrap">
+            <table class="tbl" id="policyTable">
+                <thead><tr><th>Policy</th><th>Client</th><th>Premium</th><th>Commission</th><th>Period</th></tr></thead>
+                <tbody id="policyBody"><tr><td colspan="5" class="muted" style="text-align:center;">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3><i class="fas fa-wallet" style="color:#16a34a;"></i> Payout history</h3>
+        <div class="tbl-wrap">
+            <table class="tbl" id="payoutTable">
+                <thead><tr><th>Date paid</th><th>Period covered</th><th>Amount</th><th>Status</th></tr></thead>
+                <tbody id="payoutBody"><tr><td colspan="4" class="muted" style="text-align:center;">No payouts yet.</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════ ADMIN VIEW ════════════════ -->
+<div id="adminView" style="display:none;">
+    <div class="panel">
+        <h3><i class="fas fa-percentage" style="color:#2563eb;"></i> Commission rate</h3>
+        <div class="rate-row">
+            <div class="field">
+                <label for="rateInput" style="font-size:12px;color:#64748b;margin-bottom:4px;">Flat rate (%)</label>
+                <input id="rateInput" type="number" min="0" max="100" step="0.5" placeholder="10">
+            </div>
+            <button class="btn-tiny" onclick="saveRate()"><i class="fas fa-save"></i> Save rate</button>
+            <span class="muted" id="rateMsg" style="margin-left:8px;"></span>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3><i class="fas fa-users" style="color:#2563eb;"></i> Commission by agent</h3>
+        <div class="tbl-wrap">
+            <table class="tbl" id="agentsTable">
+                <thead><tr><th>Agent</th><th>Payout period</th><th>Lifetime earned</th><th>Paid out</th><th>Pending</th><th>Action</th></tr></thead>
+                <tbody id="agentsBody"><tr><td colspan="6" class="muted" style="text-align:center;">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel" id="payoutFormPanel" style="display:none;">
+        <h3><i class="fas fa-cash-register" style="color:#16a34a;"></i> Record a payout <span id="payoutAgentName" style="color:#64748b;font-weight:400;"></span></h3>
+        <div class="form-inline">
+            <div class="field"><label>Period start</label><input id="pfStart" type="date"></div>
+            <div class="field"><label>Period end</label><input id="pfEnd" type="date"></div>
+            <div class="field"><label>Amount (KES)</label><input id="pfAmount" type="number" min="0" step="0.01"></div>
+            <button class="btn-tiny" onclick="submitPayout()"><i class="fas fa-check"></i> Mark paid</button>
+            <button class="btn-tiny" style="background:#64748b;" onclick="closePayoutForm()">Cancel</button>
+            <span class="muted" id="payoutMsg" style="margin-left:8px;"></span>
+        </div>
+    </div>
+</div>
+
+</main>
+</div>
+
+<script>
+const CSRF = document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').content || '';
+const IS_ADMIN = {{ 'true' if session['role'] == 'admin' else 'false' }};
+let currentRate = 0;
+let payoutAgent = null;
+
+function kes(n){ return 'KES ' + Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2}); }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtDate(s){ if(!s) return '—'; const d=new Date(s.replace(' ','T')); return isNaN(d)? '—' : d.toLocaleDateString('en-KE',{day:'2-digit',month:'short',year:'numeric'}); }
+function showErr(msg){ const e=document.getElementById('page_error'); e.style.display='block'; e.textContent=msg; }
+
+async function load(){
+    try{
+        const res = await fetch('/api/commissions', { headers:{'X-CSRFToken':CSRF} });
+        const data = await res.json();
+        if(!res.ok){ showErr(data.error || 'Could not load commissions.'); return; }
+        currentRate = data.rate;
+        if(IS_ADMIN){ renderAdmin(data); } else { renderAgent(data); }
+    }catch{ showErr('Network error loading commissions.'); }
+}
+
+function renderAgent(d){
+    document.getElementById('agentView').style.display='block';
+    document.getElementById('periodLabel').textContent = d.payout_period || 'period';
+    document.getElementById('kpiEarnedPeriod').textContent = kes(d.earned_this_period);
+    document.getElementById('kpiPending').textContent = kes(d.pending_payout);
+    document.getElementById('kpiLifetime').textContent = kes(d.lifetime_earned);
+    document.getElementById('kpiRate').textContent = 'at ' + d.rate + '% commission';
+
+    const pb = document.getElementById('policyBody');
+    const pols = d.policies || [];
+    pb.innerHTML = pols.length ? pols.map(p => `
+        <tr>
+            <td><strong>${esc(p.policy_no)}</strong></td>
+            <td>${esc(p.client_name||'—')}</td>
+            <td>${kes(p.premium)}</td>
+            <td><strong>${kes(p.commission)}</strong></td>
+            <td>${fmtDate(p.commencing_date)} → ${fmtDate(p.expiry_date)}</td>
+        </tr>`).join('') : '<tr><td colspan="5" class="muted" style="text-align:center;">No active policies yet.</td></tr>';
+
+    const pyb = document.getElementById('payoutBody');
+    const pays = d.payouts || [];
+    pyb.innerHTML = pays.length ? pays.map(p => `
+        <tr>
+            <td>${fmtDate(p.paid_at||p.created_at)}</td>
+            <td>${fmtDate(p.period_start)} → ${fmtDate(p.period_end)}</td>
+            <td>${kes(p.amount)}</td>
+            <td><span class="badge-${p.status==='paid'?'paid':'pending'}">${p.status}</span></td>
+        </tr>`).join('') : '<tr><td colspan="4" class="muted" style="text-align:center;">No payouts recorded yet.</td></tr>';
+}
+
+function renderAdmin(d){
+    document.getElementById('adminView').style.display='block';
+    document.getElementById('rateInput').value = d.rate;
+    const ab = document.getElementById('agentsBody');
+    const agents = d.agents || [];
+    ab.innerHTML = agents.length ? agents.map(a => `
+        <tr>
+            <td><strong>${esc(a.name)}</strong></td>
+            <td>${esc(a.payout_period)}</td>
+            <td>${kes(a.lifetime_earned)}</td>
+            <td>${kes(a.paid_out)}</td>
+            <td><strong style="color:#b45309;">${kes(a.pending_payout)}</strong></td>
+            <td><button class="btn-tiny" onclick="openPayoutForm(${a.id},'${esc(a.name)}',${a.pending_payout})"><i class="fas fa-cash-register"></i> Pay</button></td>
+        </tr>`).join('') : '<tr><td colspan="6" class="muted" style="text-align:center;">No agents.</td></tr>';
+}
+
+async function saveRate(){
+    const rate = parseFloat(document.getElementById('rateInput').value);
+    const msg = document.getElementById('rateMsg');
+    try{
+        const res = await fetch('/api/admin/commissions/rate', {
+            method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+            body: JSON.stringify({ rate })
+        });
+        const data = await res.json();
+        if(res.ok){ currentRate = rate; msg.style.color='#15803d'; msg.textContent='Saved.'; load(); }
+        else { msg.style.color='#991b1b'; msg.textContent = data.error || 'Could not save.'; }
+    }catch{ msg.style.color='#991b1b'; msg.textContent='Network error.'; }
+}
+
+function openPayoutForm(id, name, pending){
+    payoutAgent = id;
+    document.getElementById('payoutAgentName').textContent = '— ' + name;
+    document.getElementById('payoutFormPanel').style.display='block';
+    document.getElementById('pfAmount').value = Number(pending).toFixed(2);
+    document.getElementById('payoutMsg').textContent='';
+    document.getElementById('payoutFormPanel').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function closePayoutForm(){
+    document.getElementById('payoutFormPanel').style.display='none';
+    payoutAgent = null;
+}
+async function submitPayout(){
+    const msg = document.getElementById('payoutMsg');
+    if(!payoutAgent){ msg.style.color='#991b1b'; msg.textContent='Select an agent first.'; return; }
+    const body = {
+        agent_id: payoutAgent,
+        period_start: document.getElementById('pfStart').value,
+        period_end: document.getElementById('pfEnd').value,
+        amount: parseFloat(document.getElementById('pfAmount').value)
+    };
+    if(!body.period_start || !body.period_end || !body.amount){ msg.style.color='#991b1b'; msg.textContent='Fill all fields.'; return; }
+    try{
+        const res = await fetch('/api/admin/commissions/payouts', {
+            method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if(res.ok){ msg.style.color='#15803d'; msg.textContent='Payout recorded.'; closePayoutForm(); load(); }
+        else { msg.style.color='#991b1b'; msg.textContent = data.error || 'Could not record payout.'; }
+    }catch{ msg.style.color='#991b1b'; msg.textContent='Network error.'; }
+}
+
+async function logout(){ await fetch('/api/logout'); window.location.href = '/login'; }
+
+// ── Mobile Sidebar ──
+function openSidebar(){ document.querySelector('.sidebar').classList.add('open'); document.getElementById('sidebarOverlay').classList.add('open'); document.body.style.overflow='hidden'; }
+function closeSidebar(){ document.querySelector('.sidebar').classList.remove('open'); document.getElementById('sidebarOverlay').classList.remove('open'); document.body.style.overflow=''; }
+document.addEventListener('DOMContentLoaded', function(){ document.querySelectorAll('.nav-links a').forEach(function(a){ a.addEventListener('click', closeSidebar); }); });
+
+load();
+</script>
+</body>
+</html>

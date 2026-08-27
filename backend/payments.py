@@ -54,14 +54,15 @@ _safe_error_response = None
 _monarch_policy_class = None
 _next_monarch_policy_no = None
 _notify_underpayment_attempt = None
+_push_notification = None
 
 
 def init_payments(app, *, csrf, query, mongo_store, enqueue, issue_dmvic_certificate,
                    cache_delete_prefix, safe_error_response, monarch_policy_class,
-                   next_monarch_policy_no, notify_underpayment_attempt):
+                   next_monarch_policy_no, notify_underpayment_attempt, push_notification):
     global _query, _mongo_store, _enqueue, _issue_dmvic_certificate
     global _cache_delete_prefix, _safe_error_response, _monarch_policy_class
-    global _next_monarch_policy_no, _notify_underpayment_attempt
+    global _next_monarch_policy_no, _notify_underpayment_attempt, _push_notification
     _query = query
     _mongo_store = mongo_store
     _enqueue = enqueue
@@ -71,6 +72,7 @@ def init_payments(app, *, csrf, query, mongo_store, enqueue, issue_dmvic_certifi
     _monarch_policy_class = monarch_policy_class
     _next_monarch_policy_no = next_monarch_policy_no
     _notify_underpayment_attempt = notify_underpayment_attempt
+    _push_notification = push_notification
 
     csrf.exempt(mpesa_callback)
 
@@ -570,6 +572,23 @@ def mpesa_callback(secret):
             _query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
                    ('archpay_callback_not_completed',
                     f"policy={pmt['policy_no']} ref={ref} status={status}"), commit=True)
+            # Bell notification: admin (emailed) + owning agent (in-app only).
+            if _push_notification:
+                owner = _query("SELECT agent_id FROM policies WHERE policy_no=%s",
+                               (pmt['policy_no'],), fetchone=True)
+                agent_id = owner.get('agent_id') if owner else None
+                human = {'cancelled': 'cancelled', 'canceled': 'cancelled'}.get(status, status)
+                _push_notification(
+                    'mpesa_failed', 'M-Pesa payment failed',
+                    f"Payment for policy {pmt['policy_no']} {human}. Ref {ref}.",
+                    link=f"/renewals?policy={pmt['policy_no']}",
+                    user_id=None, email_admin=True)
+                if agent_id:
+                    _push_notification(
+                        'mpesa_failed', 'M-Pesa payment failed',
+                        f"Your M-Pesa payment for policy {pmt['policy_no']} {human}.",
+                        link=f"/renewals?policy={pmt['policy_no']}",
+                        user_id=agent_id)
         else:
             log.info("ArchPay callback non-final status=%s ref=%s (left pending)", status, ref)
     except Exception as e:
