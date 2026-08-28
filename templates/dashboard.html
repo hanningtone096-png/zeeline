@@ -1253,6 +1253,16 @@ async function logout() {
 }
 
 loadDashboard();
+
+// ── Reconnect resilience ───────────────────────────────────────────────────
+// If the device drops its internet connection every fetch fails with
+// net::ERR_INTERNET_DISCONNECTED and the sections fall back to error
+// empty-states. When connectivity comes back, reload the data automatically
+// instead of forcing a manual refresh.
+window.addEventListener('online', () => {
+    showToast('Back online — refreshing dashboard…', 'success');
+    loadDashboard();
+});
 </script>
 <script>
 // ── Mobile Sidebar ───────────────────────────────────────────
