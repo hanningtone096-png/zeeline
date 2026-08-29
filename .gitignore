@@ -5,6 +5,11 @@
 *.pem
 *.key
 
+# Cookie / auth-token dumps (curl -c, etc.) — never commit these
+rt.txt
+*.cookies
+cookies.txt
+
 # ── Python ─────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
