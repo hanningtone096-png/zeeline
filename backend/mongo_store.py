@@ -1,6 +1,6 @@
 import re
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from werkzeug.security import generate_password_hash
@@ -17,6 +17,21 @@ AUTO_ID_TABLES = {
     "verification_codes",
     "audit_log",
     "reports",
+    # The app reads and updates these tables by id (mark-notification-read,
+    # commission payout records, reminder dedupe), so their inserts must get
+    # one even though older documents may predate auto-id.
+    "notifications",
+    "commission_payouts",
+    "renewal_reminders",
+}
+
+# Tables whose Mongo documents may already exist without an id field: their
+# unique id index must be sparse or the build would fail on the duplicate
+# nulls. All documents created from now on get an id via _insert_doc().
+SPARSE_ID_TABLES = {
+    "notifications",
+    "commission_payouts",
+    "renewal_reminders",
 }
 
 INT_FIELDS = {
@@ -181,7 +196,11 @@ class MongoStore:
     def _ensure_indexes(self):
         self.db.counters.create_index([("_id", ASCENDING)])
         for table in AUTO_ID_TABLES:
-            self._collection(table).create_index([("id", ASCENDING)], unique=True)
+            self._collection(table).create_index(
+                [("id", ASCENDING)],
+                unique=True,
+                sparse=(table in SPARSE_ID_TABLES),
+            )
         self.db.users.create_index([("username", ASCENDING)], unique=True)
         self.db.users.create_index([("email", ASCENDING)], sparse=True)
         self.db.verification_codes.create_index([
@@ -388,16 +407,22 @@ class MongoStore:
         return rows
 
     def _write(self, sql, sql_l, params):
-        if sql_l.startswith("insert into "):
-            return self._insert_sql(sql, params)
+        if sql_l.startswith("insert into ") or sql_l.startswith("insert ignore into "):
+            return self._insert_sql(
+                sql, params, ignore=sql_l.startswith("insert ignore into "))
         if sql_l.startswith("update "):
             return self._update_sql(sql, sql_l, params)
         if sql_l.startswith("delete from "):
             return self._delete_sql(sql_l, params)
+        if sql_l.startswith(("create ", "alter ", "drop ")):
+            # Mongo documents are schema-flexible: the legacy DDL statements
+            # in ensure_schema() describe SQL tables that don't exist here.
+            # Treat them as intentional no-ops instead of erroring on boot.
+            return None
         raise NotImplementedError(f"Unsupported Mongo write query: {sql}")
 
-    def _insert_sql(self, sql, params):
-        m = re.search(r"insert\s+into\s+(\w+)\s*\((.*?)\)\s*values\s*\((.*)\)", sql, re.I)
+    def _insert_sql(self, sql, params, *, ignore=False):
+        m = re.search(r"insert\s+(?:ignore\s+)?into\s+(\w+)\s*\((.*?)\)\s*values\s*\((.*)\)", sql, re.I)
         if not m:
             raise NotImplementedError(f"Unsupported INSERT: {sql}")
         table = m.group(1).lower()
@@ -427,17 +452,40 @@ class MongoStore:
                     except ValueError:
                         value = token
             doc[col] = _coerce_field(col, value)
+        if ignore:
+            # INSERT IGNORE semantics: skip when a row with the same natural
+            # key already exists. The key is the literal (non-%s) assignments;
+            # today that is app_settings.key seeding.
+            exists_flt = ({"key": doc["key"]} if "key" in doc
+                          else {k: v for k, v in doc.items()
+                                if not isinstance(v, (int, float, bool, datetime))})
+            if exists_flt and self._collection(table).find_one(exists_flt):
+                return None
         return self._insert_doc(table, doc)
 
     def _where_filter(self, where, params):
         where_l = where.lower().strip()
         if " in " in where_l:
-            field = re.search(r"where\s+(\w+)\s+in", where_l).group(1)
-            return {field: {"$in": [_coerce_field(field, p) for p in params]}}
+            m = re.search(r"where\s+(\w+)\s+in", where_l)
+            if m:
+                field = m.group(1)
+                return {field: {"$in": [_coerce_field(field, p) for p in params]}}
+            # " in " appeared inside a function call such as DATEDIFF(...) IN
+            # (...) rather than a simple "field IN (...)" — fall through to
+            # AND-clause parsing instead of crashing on the failed match.
         clauses = [c.strip() for c in re.split(r"\s+and\s+", where, flags=re.I)]
         filter_doc = {}
         param_index = 0
         for clause in clauses:
+            if "date(created_at)" in clause and "curdate()" in clause:
+                # DATE(created_at)=CURDATE() — the per-day notification dedupe.
+                # Stored created_at values are datetimes, so constrain to
+                # [today midnight, tomorrow midnight).
+                midnight = datetime.combine(date.today(), datetime.min.time())
+                filter_doc["created_at"] = {
+                    "$gte": midnight, "$lt": midnight + timedelta(days=1),
+                }
+                continue
             m = re.search(r"([\w.]+)\s*=\s*(%s|'[^']*'|\d+)", clause, re.I)
             if not m:
                 continue
@@ -455,11 +503,17 @@ class MongoStore:
 
     def _update_sql(self, sql, sql_l, params):
         m = re.search(r"update\s+(\w+)\s+set\s+(.*?)\s+where\s+(.*)", sql, re.I)
-        if not m:
-            raise NotImplementedError(f"Unsupported UPDATE: {sql}")
-        table = m.group(1).lower()
-        assignments = _split_csv(m.group(2))
-        where = m.group(3)
+        where = None
+        if m:
+            table, assignments, where = m.group(1).lower(), m.group(2), m.group(3)
+        else:
+            # Admin "mark all as read" style updates carry no WHERE clause and
+            # must apply to every row rather than raise.
+            m = re.search(r"update\s+(\w+)\s+set\s+(.*)", sql, re.I)
+            if not m:
+                raise NotImplementedError(f"Unsupported UPDATE: {sql}")
+            table, assignments = m.group(1).lower(), m.group(2)
+        assignments = _split_csv(assignments)
         set_doc = {}
         inc_doc = {}
         param_index = 0
@@ -475,15 +529,27 @@ class MongoStore:
                 set_doc[field] = _now()
             elif right_l == "null":
                 set_doc[field] = None
+            elif right_l in {"true", "false"}:
+                # Unquoted SQL boolean literal (is_read=TRUE), not a string.
+                set_doc[field] = right_l == "true"
             elif re.match(rf"{re.escape(field)}\s*\+\s*1", right_l):
                 inc_doc[field] = 1
             elif right.startswith("'") and right.endswith("'"):
                 set_doc[field] = right[1:-1]
             else:
-                set_doc[field] = _coerce_field(field, right)
+                # Unquoted numeric literals (used=1, flagged=0) must be
+                # stored as numbers so equality filters keep matching.
+                try:
+                    value = int(right)
+                except ValueError:
+                    try:
+                        value = float(right)
+                    except ValueError:
+                        value = right
+                set_doc[field] = _coerce_field(field, value)
 
         where_params = params[param_index:]
-        filter_doc = self._where_filter("WHERE " + where, where_params)
+        filter_doc = self._where_filter("WHERE " + where, where_params) if where else {}
         update_doc = {}
         if set_doc:
             update_doc["$set"] = set_doc
@@ -527,6 +593,15 @@ class MongoStore:
             return self._declarations_history()
         if "from audit_log a left join users" in sql_l:
             return self._audit_log()
+        # Client-360 claims: claims joined to policies by claim_policy and
+        # filtered by the policy's client_id.
+        if "from claims cl join policies" in sql_l:
+            return self._claims_by_client(params)
+        # DATEDIFF expiry queries without JOINs (the expiry-notification job)
+        # need the interval post-filter that a plain equality filter can't
+        # express; joined variants go through _policies_join above.
+        if "datediff" in sql_l and "from policies" in sql_l:
+            return self._datediff_postfilter(self._select_simple(sql_l, params), sql_l, params)
 
         if "count(*) as total" in sql_l:
             return [self._count_or_sum(sql_l, params)]
@@ -534,7 +609,7 @@ class MongoStore:
             return [self._count_or_sum(sql_l, params)]
         if sql_l.startswith("select * from "):
             return self._select_simple(sql_l, params)
-        if re.match(r"select [\w,\s]+ from \w+ where", sql_l):
+        if re.match(r"select [\w,\s.]+ from \w+(?:\s+\w+)?\s+where", sql_l):
             return self._select_simple(sql_l, params)
 
         if "from verification_codes" in sql_l:
@@ -561,8 +636,20 @@ class MongoStore:
             else:
                 filter_doc = self._where_filter("WHERE " + where, params)
         sort = None
-        if "order by created_at desc" in sql_l:
-            sort = [("created_at", DESCENDING)]
+        m_order = re.search(r"order by (.+?)(?:\s+limit\s+\d+)?\s*$", sql_l)
+        if m_order:
+            specs = []
+            for spec in m_order.group(1).split(","):
+                ms = re.fullmatch(r"([\w.]+)(?:\s+(asc|desc))?", spec.strip())
+                if not ms:
+                    # ORDER BY COALESCE(...) etc. — leave unsorted rather
+                    # than guessing.
+                    specs = None
+                    break
+                specs.append((ms.group(1).split(".")[-1],
+                              DESCENDING if ms.group(2) == "desc" else ASCENDING))
+            if specs:
+                sort = specs
         m = re.search(r"limit (\d+)", sql_l)
         limit = int(m.group(1)) if m else 0
         rows = self._find_many(table, filter_doc, sort=sort, limit=limit)
@@ -596,8 +683,49 @@ class MongoStore:
         rows = self._find_many("quotations", filter_doc, sort=[("created_at", DESCENDING)], limit=200 if not period_start else 0)
         if period_start and params:
             start = _as_date(params[0])
-            rows = [r for r in rows if _as_date(r.get("created_at")) and _as_date(r.get("created_at")) >= start]
+            if start is not None:
+                rows = [r for r in rows if _as_date(r.get("created_at")) and _as_date(r.get("created_at")) >= start]
         return [self._with_agent(r) for r in rows]
+
+    def _claims_by_client(self, params):
+        """Claims linked to a client through the policy on each claim."""
+        policy_nos = [p["policy_no"] for p in
+                      self._find_many("policies", {"client_id": int(params[0])})]
+        if not policy_nos:
+            return []
+        return self._find_many("claims", {"claim_policy": {"$in": policy_nos}},
+                               sort=[("created_at", DESCENDING)])
+
+    def _datediff_postfilter(self, rows, sql_l, params):
+        """Apply DATEDIFF(expiry_date, CURDATE()) window/interval filters in
+        Python and attach days_remaining/days_left to each row.
+
+        The renewal-reminder and expiry-notification jobs filter on
+        DATEDIFF(...) IN (30, 14, 3) style interval lists, which no equality
+        filter can express; the renewals page filters on DATEDIFF(...) <= 30.
+        """
+        today = date.today()
+        intervals = None
+        in_m = re.search(r"\)\s*in\s*\(((?:\s*%s\s*,)*\s*%s)\)", sql_l)
+        if in_m:
+            count = in_m.group(1).count("%s")
+            try:
+                intervals = {int(p) for p in params[-count:]}
+            except (TypeError, ValueError):
+                intervals = None
+        window_30 = "datediff(p.expiry_date, curdate()) <= 30" in sql_l
+        out = []
+        for row in rows:
+            expiry = _as_date(row.get("expiry_date"))
+            days = (expiry - today).days if expiry else None
+            row["days_remaining"] = days
+            row["days_left"] = days
+            if window_30 and (days is None or days > 30):
+                continue
+            if intervals is not None and days not in intervals:
+                continue
+            out.append(row)
+        return sorted(out, key=lambda r: _as_date(r.get("expiry_date")) or date.max)
 
     def _clients_with_agents(self, params):
         filter_doc = {"agent_id": int(params[0])} if params else {}
@@ -676,7 +804,8 @@ class MongoStore:
 
         if "date(p.created_at) >= %s" in sql_l and params:
             start = _as_date(params[0])
-            rows = [r for r in rows if _as_date(r.get("created_at")) and _as_date(r.get("created_at")) >= start]
+            if start is not None:
+                rows = [r for r in rows if _as_date(r.get("created_at")) and _as_date(r.get("created_at")) >= start]
 
         if "vehicle_reg like %s" in sql_l and params:
             needle = str(params[0]).replace("%", "").upper()
@@ -696,17 +825,7 @@ class MongoStore:
                 rows = [r for r in rows if (self._find_one("quotations", {"id": r.get("quote_id")}) or {}).get("company") == company]
 
         if "datediff" in sql_l:
-            today = date.today()
-            filtered = []
-            for row in rows:
-                expiry = _as_date(row.get("expiry_date"))
-                days = (expiry - today).days if expiry else None
-                row["days_remaining"] = days
-                if "datediff(p.expiry_date, curdate()) <= 30" in sql_l:
-                    if days is None or days > 30:
-                        continue
-                filtered.append(row)
-            rows = sorted(filtered, key=lambda r: _as_date(r.get("expiry_date")) or date.max)
+            rows = self._datediff_postfilter(rows, sql_l, params)
 
         enriched = []
         for row in rows:
@@ -718,8 +837,10 @@ class MongoStore:
                 "first_name": client.get("first_name"),
                 "last_name": client.get("last_name"),
                 "phone": client.get("phone"),
+                "client_email": client.get("email"),
                 "client_name": " ".join(p for p in [client.get("first_name"), client.get("last_name")] if p),
                 "agent_name": user.get("full_name"),
+                "agent_email": user.get("email"),
                 "vehicle_make": quote.get("make", ""),
             })
             for key in ("company", "policy_holder_name", "chassis_number", "make", "vehicle_body_type",
