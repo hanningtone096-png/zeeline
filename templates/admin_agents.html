@@ -283,17 +283,42 @@ function renderFlagCell(a) {
     return '<span style="color:#cbd5e1;">—</span>';
 }
 
-// Only one action menu open at a time; close on outside click.
+// Only one action menu open at a time; closing on outside click.
+// The open menu is placed with position:fixed against the button's screen
+// position, so it is never clipped by the table's scroll container and
+// never opens off the bottom of the screen — it flips up instead.
+function closeActionMenus() {
+    document.querySelectorAll('.action-menu-panel.show').forEach(p => {
+        p.classList.remove('show');
+        ['position','left','right','top','bottom'].forEach(k => p.style.removeProperty(k));
+    });
+}
+
 function toggleActionMenu(evt, id) {
     evt.stopPropagation();
     const panel = document.getElementById(`amenu-${id}`);
     const wasOpen = panel.classList.contains('show');
-    document.querySelectorAll('.action-menu-panel.show').forEach(p => p.classList.remove('show'));
-    if (!wasOpen) panel.classList.add('show');
+    closeActionMenus();
+    if (wasOpen) return;
+
+    panel.classList.add('show');
+    const btn = panel.parentElement.querySelector('.action-trigger-btn');
+    const r = btn.getBoundingClientRect();
+    panel.style.position = 'fixed';
+    panel.style.right = 'auto';
+    panel.style.left = Math.min(Math.max(8, r.left), window.innerWidth - panel.offsetWidth - 8) + 'px';
+    // Open downward if there's room; otherwise flip up above the button.
+    if (window.innerHeight - r.bottom < panel.offsetHeight + 12 && r.top > panel.offsetHeight + 12) {
+        panel.style.top = 'auto';
+        panel.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    } else {
+        panel.style.top = (r.bottom + 6) + 'px';
+    }
 }
-document.addEventListener('click', () => {
-    document.querySelectorAll('.action-menu-panel.show').forEach(p => p.classList.remove('show'));
-});
+document.addEventListener('click', closeActionMenus);
+// A fixed menu would detach from its row while scrolling — close it.
+window.addEventListener('scroll', closeActionMenus, true);
+window.addEventListener('resize', closeActionMenus);
 
 // ── Actions (same endpoints as the dashboard) ─────────────────────────────
 async function setAgentStatus(id, status) {

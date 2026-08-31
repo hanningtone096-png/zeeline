@@ -474,6 +474,8 @@ input, select, textarea {
     z-index: 1000; /* Ensure it floats above table containers */
     min-width: 140px;
     padding: 4px 0;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
 }
 
 /* Active modifier toggle */
@@ -909,8 +911,17 @@ input, select, textarea {
     }
     .responsive-table td[data-label=""]::before { content: none; }
     .responsive-table td:not([data-label]) { justify-content: flex-start; }
-    /* Actions / long text cells read better left-aligned */
-    .responsive-table td:has(.actions-cell) { justify-content: flex-end; }
+    /* Actions first: hoist the actions cell to the top of each card so
+       Approve/Reject/etc. are visible immediately — no scrolling down
+       through the row's data to reach them. The menu itself opens as a
+       fixed overlay (see toggleActionMenu), so it also never gets
+       clipped by the table's scroll container. */
+    .responsive-table td:has(.actions-cell) {
+        order: -1;
+        justify-content: flex-end;
+        border-bottom: 1px solid #e2e8f0;
+        padding-top: 12px;
+    }
     .table-scroll { overflow-x: visible; }
 }
 
