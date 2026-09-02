@@ -656,6 +656,23 @@ DMVIC_ERROR_MESSAGES = {
     'ER006': 'DMVIC has no certificate inventory available right now.',
     'ER007': 'Vehicle details changed from a previously issued certificate — manual review needed.',
 }
+
+
+def _dmvic_error_message(code, raw):
+    """Build the user-facing message for one DMVIC error entry.
+
+    The static map is a friendlier rewrite of the well-known codes, but DMVIC
+    often includes its own errorText alongside them (ER002 especially is a
+    catch-all whose accompanying text is the only clue to what actually went
+    wrong). Prefer keeping both: the mapped text prefixed with the code so
+    failures can be matched against the server log, plus DMVIC's raw text.
+    """
+    friendly = DMVIC_ERROR_MESSAGES.get(code)
+    raw = (raw or '').strip()
+    prefix = f"[{code}] " if code else ''
+    if friendly and raw:
+        return f"{prefix}{friendly} (DMVIC: {raw})"
+    return f"{prefix}{raw or friendly or ''}"
 DMVIC_LOGIN_ERRORS = {
     -2: "DMVIC account password is not set. Please activate your account.",
     -3: "DMVIC username or password is incorrect.",
@@ -668,17 +685,6 @@ DMVIC_LOGIN_ERRORS = {
 
 _dmvic_token_cache = {"token": None, "expires": None}
 _dmvic_token_lock = threading.Lock()
-
-
-def _dmvic_clear_token_cache():
-    """Discard a token DMVIC has explicitly rejected.
-
-    DMVIC permits one active token per account.  Retaining a rejected token
-    until its advertised expiry makes every later request fail in exactly the
-    same way, even after the account itself has been restored.
-    """
-    _dmvic_token_cache["token"] = None
-    _dmvic_token_cache["expires"] = None
 
 
 def _dmvic_clear_token_cache():
@@ -890,7 +896,7 @@ def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approve
     for error in errors:
         code = error.get("code") or error.get("errorCode", "")
         message = error.get("message") or error.get("errorText", "")
-        messages.append(DMVIC_ERROR_MESSAGES.get(code, message) or message)
+        messages.append(_dmvic_error_message(code, message))
     log.warning("DMVIC confirm-issuance failed (%s): %s", data.get("APIRequestNumber"), messages)
     return {
         "success": False,
@@ -976,11 +982,13 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
         }
 
     errors = data.get("Errors") or data.get("Error") or []
+    if isinstance(errors, dict):
+        errors = [errors]
     messages = []
     for err in errors:
         code = err.get("code") or err.get("errorCode", "")
         msg  = err.get("message") or err.get("errorText", "")
-        messages.append(DMVIC_ERROR_MESSAGES.get(code, msg) or msg)
+        messages.append(_dmvic_error_message(code, msg))
 
     log.warning("DMVIC issuance failed (%s): %s | raw_errors=%s | payload_sent=%s",
                 data.get("APIRequestNumber"), messages, errors, payload)
@@ -1074,11 +1082,13 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
         }
 
     errors = data.get("Errors") or data.get("Error") or []
+    if isinstance(errors, dict):
+        errors = [errors]
     messages = []
     for err in errors:
         code = err.get("code") or err.get("errorCode", "")
         msg  = err.get("message") or err.get("errorText", "")
-        messages.append(DMVIC_ERROR_MESSAGES.get(code, msg) or msg)
+        messages.append(_dmvic_error_message(code, msg))
 
     log.warning("DMVIC Type B issuance failed (%s): %s | raw_errors=%s | payload_sent=%s",
                 data.get("APIRequestNumber"), messages, errors, payload)
@@ -1161,11 +1171,13 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
         }
 
     errors = data.get("Errors") or data.get("Error") or []
+    if isinstance(errors, dict):
+        errors = [errors]
     messages = []
     for err in errors:
         code = err.get("code") or err.get("errorCode", "")
         msg  = err.get("message") or err.get("errorText", "")
-        messages.append(DMVIC_ERROR_MESSAGES.get(code, msg) or msg)
+        messages.append(_dmvic_error_message(code, msg))
 
     # DEBUG: ER003/ER004 map to generic text and don't say WHICH field DMVIC
     # rejected. Log the raw error objects (may contain a field/property name)
@@ -1274,11 +1286,13 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
         }
 
     errors = data.get("Errors") or data.get("Error") or []
+    if isinstance(errors, dict):
+        errors = [errors]
     messages = []
     for err in errors:
         code = err.get("code") or err.get("errorCode", "")
         msg  = err.get("message") or err.get("errorText", "")
-        messages.append(DMVIC_ERROR_MESSAGES.get(code, msg) or msg)
+        messages.append(_dmvic_error_message(code, msg))
 
     log.warning("DMVIC Type D issuance failed (%s): %s | raw_errors=%s | payload_sent=%s",
                 data.get("APIRequestNumber"), messages, errors, payload)
@@ -1453,7 +1467,10 @@ def _issue_dmvic_certificate_impl(policy_no, quote_row):
     unknown-column error until that migration is applied.
     """
     policy = query("SELECT status FROM policies WHERE policy_no=%s", (policy_no,), fetchone=True)
-    if not policy or policy.get('status') != 'active':
+    # TEMP(payment-bypass): 'pending_payment' is also accepted while the
+    # pay-before-issuance gate is lifted (see TEMP blocks in payments.py) —
+    # restore to `!= 'active'` when the payment gate goes back on.
+    if not policy or policy.get('status') not in ('active', 'pending_payment'):
         log.warning("DMVIC issuance skipped for unpaid or missing policy %s", policy_no)
         return
 

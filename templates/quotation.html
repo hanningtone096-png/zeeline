@@ -1583,10 +1583,13 @@ function pollDmvicStatus(policyNo) {
     const render = (statusData) => {
         const status = statusData.dmvic_status;
 
-        if (status === 'awaiting_payment' || statusData.policy_status === 'pending_payment') {
+        // TEMP(payment-bypass): issuance now runs before payment settles, so
+        // key off dmvic_status alone — policy_status stays 'pending_payment'
+        // even once the certificate has been issued or has failed.
+        if (status === 'awaiting_payment' || status === 'queued' || status === 'pending') {
             box.className = 'dmvic-status-box pending';
-            box.innerHTML = `<i class="fas fa-clock"></i> Awaiting confirmed payment. DMVIC certificate issuance starts automatically after payment.`;
-            return true;
+            box.innerHTML = `<i class="fas fa-clock"></i> DMVIC certificate issuance in progress…`;
+            return false; // keep polling until a terminal status lands
         }
 
      if (status === 'issued') {

@@ -320,10 +320,21 @@ class MongoStore:
         pending_payment predicate makes this transition idempotent: exactly one
         caller receives the pre-transition policy document and may enqueue
         certificate issuance.
+
+        TEMP(payment-bypass): while the payment gate is lifted, buy_cover
+        enqueues issuance at policy-creation time, so a settled
+        dmvic_status may already exist when payment lands. Activation then
+        only flips the status and must NOT clobber the DMVIC result back to
+        'queued' (that would lose the outcome and requeue a duplicate
+        certificate request). Remove the second find_one_and_update branch
+        when the payment gate is restored.
         """
         self._ensure_ready()
+        settled = {'issued', 'failed', 'pending_manual',
+                   'pending_confirmation', 'unsupported'}
         previous = self.db.policies.find_one_and_update(
-            {"policy_no": policy_no, "status": "pending_payment"},
+            {"policy_no": policy_no, "status": "pending_payment",
+             "dmvic_status": {"$nin": sorted(settled)}},
             {
                 "$set": {
                     "status": "active",
@@ -334,7 +345,16 @@ class MongoStore:
             },
             return_document=ReturnDocument.BEFORE,
         )
-        return _serialize(previous)
+        if previous is not None:
+            return _serialize(previous)
+
+        previous = self.db.policies.find_one_and_update(
+            {"policy_no": policy_no, "status": "pending_payment",
+             "dmvic_status": {"$in": sorted(settled)}},
+            {"$set": {"status": "active", "updated_at": _now()}},
+            return_document=ReturnDocument.BEFORE,
+        )
+        return _serialize(previous) if previous else None
 
     def next_monarch_policy_sequence(self, policy_class):
         """Return the next Monarch class-specific policy sequence atomically."""
