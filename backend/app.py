@@ -990,7 +990,7 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
         msg  = err.get("message") or err.get("errorText", "")
         messages.append(_dmvic_error_message(code, msg))
 
-    log.warning("DMVIC issuance failed (%s): %s | raw_errors=%s | payload_sent=%s",
+    log.warning("DMVIC issuance failed (%s): %s | raw_errors=%s | full_response=%s | payload_sent=%s",
                 data.get("APIRequestNumber"), messages, errors, payload)
     return {
         "success": False,
@@ -1090,7 +1090,7 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
         msg  = err.get("message") or err.get("errorText", "")
         messages.append(_dmvic_error_message(code, msg))
 
-    log.warning("DMVIC Type B issuance failed (%s): %s | raw_errors=%s | payload_sent=%s",
+    log.warning("DMVIC Type B issuance failed (%s): %s | raw_errors=%s | full_response=%s | payload_sent=%s",
                 data.get("APIRequestNumber"), messages, errors, payload)
     return {
         "success": False,
@@ -1183,7 +1183,7 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
     # rejected. Log the raw error objects (may contain a field/property name)
     # plus the payload we sent (minus nothing sensitive here) so failures are
     # actually diagnosable instead of just "something was missing/invalid".
-    log.warning("DMVIC Type C issuance failed (%s): %s | raw_errors=%s | payload_sent=%s",
+    log.warning("DMVIC Type C issuance failed (%s): %s | raw_errors=%s | full_response=%s | payload_sent=%s",
                 data.get("APIRequestNumber"), messages, errors, payload)
     return {
         "success": False,
@@ -1294,7 +1294,7 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
         msg  = err.get("message") or err.get("errorText", "")
         messages.append(_dmvic_error_message(code, msg))
 
-    log.warning("DMVIC Type D issuance failed (%s): %s | raw_errors=%s | payload_sent=%s",
+    log.warning("DMVIC Type D issuance failed (%s): %s | raw_errors=%s | full_response=%s | payload_sent=%s",
                 data.get("APIRequestNumber"), messages, errors, payload)
     return {
         "success": False,
