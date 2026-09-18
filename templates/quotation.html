@@ -60,7 +60,9 @@
 .select-card i { font-size:16px; }
 .select-card.disabled { opacity:.55; cursor:not-allowed; background:#f8fafc; position:relative; }
 .select-card.disabled:hover { border-color:#e2e8f0; }
-.select-card .card-coming-soon { display:block; margin-top:4px; font-size:10px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:.04em; }
+/* "Coming soon" badge — pushed to the right edge of whichever flex row holds
+   it, so it reads as a tag on the insurer name rather than part of it. */
+.card-coming-soon { margin-left:auto; font-size:10px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:.04em; }
 .product-empty { grid-column:1/-1; padding:16px; text-align:center; color:#94a3b8; font-size:13px; border:1px dashed #e2e8f0; border-radius:8px; }
 
 .cover-option.disabled-option { display:none; }
@@ -322,11 +324,10 @@
         <small id="coverHint" style="color:#94a3b8;"></small>
     </div>
     <div class="form-group">
-        <label for="type_of_certificate">Certificate Type *</label>
+        <label for="type_of_certificate" id="certificateLabel">Certificate Type *</label>
         <select id="type_of_certificate">
             <option value="">— Select —</option>
             <option value="annual">Annual</option>
-            <option value="30_days">30 Days</option>
             <option value="inst_2">2 Instalments</option>
         </select>
     </div>
@@ -353,8 +354,17 @@
 </div>
 <div class="form-group" id="tonnageRow"><label for="tonnage">Tonnage (Commercial Vehicle) *</label><input id="tonnage" type="number" min="0" step="0.1" placeholder="e.g. 3.5"></div>
 <div class="form-group" id="paxRow"><label for="pax">Number of Passengers (for TPO banding) *</label><input id="pax" type="number" min="0" placeholder="e.g. 14"><small style="color:#64748b;">Used to place this vehicle in the correct passenger band for Third Party Only premiums.</small></div>
+<div class="form-group">
+    <label>Is this a TOR (Temporary Operational Receipt)? *</label>
+    <div class="product-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));">
+        <div class="select-card selected" id="torNo" data-value="no">No — full certificate</div>
+        <div class="select-card" id="torYes" data-value="yes">Yes — TOR estimate</div>
+    </div>
+    <small style="color:#64748b;">TOR is a rates-only estimate: it shows what the cover would cost, but it cannot be quoted, saved or issued.</small>
+</div>
+
 <section class="premium-comparison" aria-live="polite" aria-labelledby="premiumComparisonTitle">
-    <div class="premium-comparison-head"><div><h3 id="premiumComparisonTitle"><i class="fas fa-scale-balanced" style="color:#2563eb;"></i> Available Premiums</h3><p>Choose an insurer after comparing the live premium for this cover.</p></div></div>
+    <div class="premium-comparison-head"><div><h3 id="premiumComparisonTitle"><i class="fas fa-scale-balanced" style="color:#2563eb;"></i> Available Premiums</h3><p id="premiumComparisonSubtitle">Choose an insurer after comparing the live premium for this cover.</p></div></div>
     <div class="comparison-grid" id="premiumComparisonCards"><div class="comparison-placeholder">Select a product, cover and certificate type to compare insurers.</div></div>
 </section>
 
@@ -513,7 +523,7 @@ function withCsrf(headers = {}) {
 
 const data = {
     company:null, type_of_cover:'', type_of_certificate:'',
-    product:null, sub_type:null, pax:0, business_type:'new', parent_policy_no:null,
+    product:null, sub_type:null, pax:0, business_type:'new', parent_policy_no:null, is_tor:false,
     extension_company:null, selected_premium:null,
     commencing_date:'', expiry_date:'',
     policy_holder_name:'', email:'', phone:'', kra_pin:'', id_number:'', postal_address:'',
@@ -533,9 +543,9 @@ const COMPANY_LOGOS = {
 const SUBTYPE_GROUPS = {
     tuktuk: {
         label: 'TukTuk Use *',
+        // PSV tuk-tuks are not offered — Commercial only.
         chips: [
             { value:'tuktuk_commercial', label:'Commercial' },
-            { value:'tuktuk_psv',        label:'PSV (Passenger)' },
         ]
     },
     motorcycle_psv_rating: {
@@ -555,11 +565,12 @@ const SUBTYPE_GROUPS = {
     }
 };
 
-// Private, Commercial (own goods / general cartage / hybrid), and now
-// private Motorcycle (non-PSV, Type D issuance) are live for sale.
-// PSV and every other category (institutional, agriculture, motor trade,
-// tuktuk, driving school, special vehicles, motorcycle_psv, etc.) are
-// shown but marked Coming Soon until underwriting is set up for them —
+// Private, Commercial (own goods / general cartage / hybrid), private
+// Motorcycle (non-PSV, Type D issuance) and Directline TukTuk are live for
+// sale. PSV and every other category (institutional, agriculture, motor
+// trade, driving school, special vehicles, motorcycle_psv, etc.) are hidden
+// from the grid until underwriting is set up for them. This set only filters
+// catalog-derived keys — virtual tiles are added by hand in renderProductGrid().
 const ACTIVE_PRODUCT_KEYS = new Set([
     'private', 'private_fleet',
     'motorcycle',
@@ -751,6 +762,29 @@ document.querySelectorAll('[data-value][id^="bt"]').forEach(card => {
     });
 });
 
+// TOR is its own yes/no option rather than a certificate period: each insurer
+// prices it as a flat gross figure and it is never quoted, persisted or
+// issued. Turning it on clears any insurer choice and re-runs the comparison
+// in rates-only mode, where no insurer can be selected.
+document.querySelectorAll('[data-value][id^="tor"]').forEach(card => {
+    card.addEventListener('click', () => {
+        document.querySelectorAll('[data-value][id^="tor"]').forEach(item => item.classList.remove('selected'));
+        card.classList.add('selected');
+        data.is_tor = card.dataset.value === 'yes';
+        data.company = null;
+        data.selected_premium = null;
+        comparisonExpanded = true;
+        document.getElementById('type_of_certificate').disabled = data.is_tor;
+        document.getElementById('certificateLabel').innerText =
+            data.is_tor ? 'Certificate Type (not used for TOR)' : 'Certificate Type *';
+        document.getElementById('premiumComparisonSubtitle').innerText = data.is_tor
+            ? 'TOR is a rates-only estimate — these figures cannot be quoted or issued.'
+            : 'Choose an insurer after comparing the live premium for this cover.';
+        clearError();
+        schedulePremiumComparison();
+    });
+});
+
 async function refreshAvailablePeriods() {
     const select = document.getElementById('type_of_certificate');
     if (!data.product) return;
@@ -810,6 +844,15 @@ function renderProductGrid() {
     // real product when premiums are compared/quoted.
     let html = `<div class="select-card product-card" data-value="commercial">
                     <i class="fas fa-truck"></i><br>Commercial (Own Goods/Cartage)</div>`;
+
+    // "TukTuk" is likewise a virtual tile — the "TukTuk Use" chip under it
+    // supplies the real product key (tuktuk_commercial). It is rendered only
+    // while some insurer's catalog still carries that product, so withdrawing
+    // TukTuk everywhere removes the tile without another edit here.
+    if (entriesByProduct.has('tuktuk_commercial')) {
+        html += `<div class="select-card product-card" data-value="tuktuk">
+                    <i class="fas fa-shuttle-van"></i><br>TukTuk</div>`;
+    }
 
     byLabel.forEach(({ key, info }) => {
         const icon = info.icon || 'fa-car';
@@ -945,11 +988,14 @@ function comparisonPayload() {
         vehicle_value: Number(document.getElementById('vehicle_value').value || 0),
         tonnage: Number(document.getElementById('tonnage').value || 0),
         pax: Number(document.getElementById('pax').value || 0),
+        is_tor: !!data.is_tor,
     };
 }
 
 function comparisonReadiness(payload) {
-    if (!payload.product || !payload.type_of_cover || !payload.type_of_certificate) {
+    // TOR ignores the certificate entirely — it is priced as a flat figure.
+    if (!payload.product || !payload.type_of_cover
+        || (!payload.type_of_certificate && !payload.is_tor)) {
         return 'Select a product, cover and certificate type to compare insurers.';
     }
     if (payload.seats < 1) return 'Enter the number of seats to compare premiums.';
@@ -1000,6 +1046,13 @@ function renderPremiumComparison(items = [], placeholder = '') {
         const extensionMismatch = data.business_type === 'extension' && data.extension_company &&
             item.company !== data.extension_company;
         const available = item.available && !extensionMismatch;
+        // A priced-but-unselectable insurer: Definite is "coming soon" and
+        // every TOR row is a rates-only estimate. Both show a real figure, but
+        // neither may become data.company — that is what guarantees no
+        // quotation is ever created for them.
+        const comingSoon = !!item.coming_soon;
+        const ratesOnly = !!item.rates_only;
+        const selectable = available && item.selectable !== false;
         const reason = extensionMismatch
             ? 'Extensions must stay with the insurer on the original policy.'
             : (item.reason || 'This insurer does not offer this selection.');
@@ -1007,11 +1060,21 @@ function renderPremiumComparison(items = [], placeholder = '') {
         const price = Number(item.total_payable || 0).toLocaleString('en-KE', {
             style: 'currency', currency: 'KES', maximumFractionDigits: 0
         });
-        return `<article class="comparison-card${selected ? ' selected' : ''}${available ? '' : ' unavailable'}">
-            <div class="comparison-brand">${logo ? `<img class="comparison-logo" src="${logo}" alt="${esc(cap(item.company))} logo">` : ''}<strong>${esc(cap(item.company))}</strong></div>
-            <div class="comparison-status"><i class="fas ${available ? 'fa-circle-check' : 'fa-circle-minus'}"></i> ${available ? 'Available' : 'Not available'}</div>
-            ${available ? `<div class="comparison-price">${price}</div><div class="comparison-meta">${esc(item.note || 'Includes levies and taxes')}</div>` : `<div class="comparison-meta">${esc(reason)}</div>`}
-            ${available ? `<button type="button" onclick="selectComparisonCompany('${item.company}', ${Number(item.total_payable || 0)})">${selected ? 'Selected' : 'Choose'}</button>` : ''}
+        const status = selectable
+            ? { icon: 'fa-circle-check', text: 'Available' }
+            : comingSoon
+                ? { icon: 'fa-clock',        text: 'Coming soon' }
+                : ratesOnly
+                    ? { icon: 'fa-circle-info',  text: 'Rates only' }
+                    : { icon: 'fa-circle-minus', text: 'Not available' };
+        const note = item.note || (ratesOnly
+            ? 'Rates-only estimate — cannot be quoted or issued'
+            : 'Includes levies and taxes');
+        return `<article class="comparison-card${selected ? ' selected' : ''}${selectable ? '' : ' unavailable'}">
+            <div class="comparison-brand">${logo ? `<img class="comparison-logo" src="${logo}" alt="${esc(cap(item.company))} logo">` : ''}<strong>${esc(cap(item.company))}</strong>${comingSoon ? '<span class="card-coming-soon">Coming soon</span>' : ''}</div>
+            <div class="comparison-status"><i class="fas ${status.icon}"></i> ${status.text}</div>
+            ${available ? `<div class="comparison-price">${price}</div><div class="comparison-meta">${esc(note)}</div>` : `<div class="comparison-meta">${esc(reason)}</div>`}
+            ${selectable ? `<button type="button" onclick="selectComparisonCompany('${item.company}', ${Number(item.total_payable || 0)})">${selected ? 'Selected' : 'Choose'}</button>` : ''}
         </article>`;
     }).join('') + (data.company && items.some(item => item.company === data.company && item.available)
         ? '<button type="button" class="comparison-show-less" onclick="collapseComparison()">Show less</button>'
@@ -1192,6 +1255,12 @@ function nextStep() {
         data.commencing_date     = document.getElementById('commencing_date').value;
         data.expiry_date         = document.getElementById('expiry_date').value;
 
+        // TOR stops here by design — it is a rates-only estimate, so there is
+        // nothing to carry into a policy. The server rejects it as well.
+        if (data.is_tor)
+            return showError('TOR is a rates-only estimate and cannot be quoted or issued. '
+                           + 'Set TOR back to "No" to continue with a full certificate.');
+
         if (!data.product)             return showError('Please select a product (and use type, where applicable).');
         if (data.product === 'commercial' && !data.sub_type)
             return showError('Please select a Commercial Use Type (Own Goods / General Cartage / Prime Mover).');
@@ -1208,8 +1277,16 @@ function nextStep() {
         if (document.getElementById('paxRow').style.display !== 'none' && rating.pax <= 0)
             return showError('Number of passengers is required for this vehicle type.');
         if (!data.company) return showError('Compare the available premiums, then choose an insurer.');
-        if (!premiumComparisonResults.some(item => item.company === data.company && item.available))
+        const chosen = premiumComparisonResults.find(item => item.company === data.company);
+        if (!chosen || !chosen.available)
             return showError('The premium comparison is still updating. Please choose an available insurer.');
+        // Definite (coming soon) and TOR rows are priced but never selectable.
+        // An extension can still name such an insurer, so fail fast and clearly
+        // here rather than letting the server reject it two steps later.
+        if (chosen.coming_soon)
+            return showError(`${cap(data.company)} is not available for new business yet.`);
+        if (chosen.selectable === false)
+            return showError(`${cap(data.company)} cannot be quoted for this selection.`);
         if (data.business_type === 'extension' && !data.parent_policy_no)
             return showError('Fetch the prior installment policy before continuing with an extension.');
         if (data.business_type === 'extension' && !isInstallmentPlan())
@@ -1280,7 +1357,9 @@ function goToReview() {
                            seats, vehicle_value:value, tonnage, pax,
                            year_of_manufacture: yom, year_of_registration: yor });
 
-    const CERT_LABELS = { annual:'Annual','30_days':'30 Days','14_days':'14 Days','7_days':'7 Days', inst_2:'2 Instalments', inst_3:'3 Instalments' };
+    // Only annual and the installment plans are still issued; the short-term
+    // certificates (30/14/7-day) are retired, so they carry no label.
+    const CERT_LABELS = { annual:'Annual', inst_2:'2 Instalments', inst_3:'3 Instalments' };
     const catalog  = INSURER_CATALOG[data.company] || {};
     const prodInfo = catalog[data.product];
     const productLabel = prodInfo ? prodInfo.label : fmtEnum(data.product);

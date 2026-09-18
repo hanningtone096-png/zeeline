@@ -177,7 +177,7 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "company": {"type": "string", "enum": ["monarch", "directline", "definite"]},
          "type_of_cover": {"type": "string", "enum": ["comprehensive", "third_party_only", "third_party_fire_theft"]},
-         "type_of_certificate": {"type": "string", "enum": ["annual", "30_days", "inst_2"]},
+         "type_of_certificate": {"type": "string", "enum": ["annual", "inst_2"]},
          "product": {"type": "string"}, "sub_type": {"type": "string"},
          "commencing_date": {"type": "string"}, "expiry_date": {"type": "string"},
          "policy_holder_name": {"type": "string"}, "phone": {"type": "string"},

@@ -66,11 +66,20 @@ INSTALLMENT_CAPS = {
 
 NO_INSTALLMENTS_PRODUCTS = {'motorcycle', 'motorcycle_psv'}
 
-NO_SHORT_TERM = {
-    ('directline', 'private',        'third_party_only'),
-    ('directline', 'motorcycle',     'third_party_only'),
-    ('directline', 'motorcycle_psv', 'third_party_only'),
-}
+# Insurers that sell no installment plans at all, whatever the product. Kept
+# separate from INSTALLMENT_CAPS on purpose: that dict falls back to 2 via
+# .get(company, 2), so dropping an insurer from it would NOT revoke anything.
+# Directline's INSTALLMENT_CAPS entry is left as a record of its former cap but
+# is now superseded by this set.
+NO_INSTALLMENT_INSURERS = {'directline'}
+
+# Insurers whose rates are shown for comparison but which cannot be selected or
+# quoted yet. They still price (so their figure appears in the comparison) but
+# the wizard renders no Choose button for them, and both quotation generation
+# and the buy step reject them — so no quotation is ever created for one, and
+# DMVIC issuance is unreachable. Lives here rather than app.py because
+# payments.py needs it and must not import app.py (circular import).
+COMING_SOON_INSURERS = {'definite'}
 
 
 def _period_base(annual_base, certificate):
@@ -86,15 +95,19 @@ def _period_base(annual_base, certificate):
 def allowed_installments(company, product):
     if (product or '').lower() in NO_INSTALLMENTS_PRODUCTS:
         return set()
+    if (company or '').lower() in NO_INSTALLMENT_INSURERS:
+        return set()
     cap = INSTALLMENT_CAPS.get((company or '').lower(), 2)
     return {f'inst_{number}' for number in range(2, cap + 1)}
 
 
 def available_periods(company, product, cover):
-    base_periods = ['annual', '30_days', '14_days', '7_days']
-    key = ((company or '').lower(), product, cover)
-    if key in NO_SHORT_TERM:
-        base_periods = ['annual']
+    # The short-term periods (30/14/7-day) are retired from sale. 30_days was
+    # replaced by the TOR estimate option, which is its own toggle rather than a
+    # certificate type; 14_days and 7_days had already been dropped from the
+    # quotation form. PERIOD_FACTORS deliberately still prices all three so
+    # quotations written before the change keep computing.
+    base_periods = ['annual']
     return base_periods + [
         certificate for certificate in ('inst_2', 'inst_3')
         if certificate in allowed_installments(company, product)
@@ -119,8 +132,6 @@ INSURER_PRODUCTS = {
         'tour_service':         {'label': 'Tour Service Vehicles',        'icon': 'fa-route',          'covers': ['comprehensive', 'third_party_only']},
         'motorcycle':           {'label': 'Motorcycle — Private',         'icon': 'fa-motorcycle',     'covers': ['comprehensive', 'third_party_only']},
         'motorcycle_psv':       {'label': 'Motorcycle — PSV',              'icon': 'fa-motorcycle',     'covers': ['comprehensive', 'third_party_only']},
-        'tuktuk_commercial':    {'label': 'TukTuk — Commercial',          'icon': 'fa-shuttle-van',    'covers': ['comprehensive', 'third_party_only']},
-        'tuktuk_psv':           {'label': 'TukTuk — PSV',                  'icon': 'fa-shuttle-van',    'covers': ['comprehensive', 'third_party_only']},
     },
     'directline': {
         'private':              {'label': 'Motor Private',                 'icon': 'fa-car',            'covers': ['comprehensive', 'third_party_only']},
@@ -131,6 +142,7 @@ INSURER_PRODUCTS = {
         'special_vehicles':     {'label': 'Special Vehicles',              'icon': 'fa-cogs',           'covers': ['third_party_only']},
         'motorcycle':           {'label': 'Motorcycle — Private',         'icon': 'fa-motorcycle',     'covers': ['third_party_only']},
         'motorcycle_psv':       {'label': 'Motorcycle — PSV/Boda',        'icon': 'fa-motorcycle',     'covers': ['third_party_only']},
+        'tuktuk_commercial':    {'label': 'TukTuk — Commercial',          'icon': 'fa-shuttle-van',    'covers': ['third_party_only']},
         'psv':                  {'label': 'PSV Matatu/Bus',                'icon': 'fa-bus',            'covers': ['third_party_only']},
     },
     'definite': {
@@ -150,8 +162,6 @@ INSURER_PRODUCTS = {
         'motorcycle':             {'label': 'Motorcycle (Non-PSV)',               'icon': 'fa-motorcycle',       'covers': ['comprehensive', 'third_party_only']},
         'motorcycle_psv':         {'label': 'Motorcycle — PSV',                    'icon': 'fa-motorcycle',       'covers': ['comprehensive', 'third_party_only']},
         'electric_motorbike':     {'label': 'Electric Motorbike',                  'icon': 'fa-charging-station', 'covers': ['third_party_only']},
-        'tuktuk_commercial':      {'label': 'TukTuk — Commercial',                'icon': 'fa-shuttle-van',      'covers': ['comprehensive', 'third_party_only']},
-        'tuktuk_psv':             {'label': 'TukTuk — PSV',                        'icon': 'fa-shuttle-van',      'covers': ['comprehensive', 'third_party_only']},
         'psv':                    {'label': 'PSV Matatu (7–35 pax)',              'icon': 'fa-bus',              'covers': ['comprehensive', 'third_party_only']},
         'psv_bus':                {'label': 'PSV Bus (Above 35 pax)',             'icon': 'fa-bus-alt',          'covers': ['comprehensive', 'third_party_only']},
         'psv_electric_bus':       {'label': 'PSV Electric Bus',                    'icon': 'fa-bus-alt',          'covers': ['comprehensive', 'third_party_only']},
@@ -640,6 +650,11 @@ DIRECTLINE_TP_FLAT = {
     'private':         3_171,
     'motorcycle':      3_194,
     'motorcycle_psv':  3_651,
+    # TukTuk is a flat 2,784 gross — the Directline third-party branch passes
+    # this through _flat_quote() and then _extract_levies(), so the figure the
+    # customer pays is exactly 2,784 with the levy/duty split back out for
+    # display, the same convention as the rest of this table.
+    'tuktuk_commercial': 2_784,
 }
 
 DIRECTLINE_TONNAGE_TP = [
@@ -730,6 +745,68 @@ def _flat_quote(annual_amount, certificate, minimum_floor=500):
     def rate_fn(f, amt=annual_base):
         return amt
     return base, rate_fn
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOR — the rates-only estimate option
+#
+# TOR is neither a certificate period nor a vehicle product: it is its own
+# yes/no option in the quotation wizard. It is priced as a flat GROSS figure
+# (levies and stamp duty already included — confirmed against the rate sheet),
+# which is why it must NOT go through _period_base(): that multiplies by
+# PERIOD_FACTORS, and TOR is a fixed total rather than a fraction of annual.
+#
+# TOR is displayed only. It is never persisted and never issued — see the
+# is_tor handling in app.py, which rejects it before anything is written.
+# ─────────────────────────────────────────────────────────────────────────────
+
+TOR_RATES = {
+    'directline': 550,
+    'monarch':    700,
+    'definite':   550,   # private vehicles; commercial takes TOR_COMMERCIAL_RATE
+}
+
+# Definite charges commercial vehicles the same higher flat rate at every
+# tonnage: the "up to 3 tonnes" line in the source doc is not a pricing
+# boundary, since the rate is constant across the range.
+TOR_COMMERCIAL_RATE = 700
+
+# Definite products priced as private for TOR. Every other Definite product is
+# commercial and takes TOR_COMMERCIAL_RATE.
+DEFINITE_TOR_PRIVATE_PRODUCTS = {'private', 'private_fleet'}
+
+
+def tor_rate(company, product):
+    """Flat gross TOR figure for this insurer/product, or None if not offered."""
+    company = (company or '').lower()
+    if company not in TOR_RATES:
+        return None
+    if company == 'definite' and product not in DEFINITE_TOR_PRIVATE_PRODUCTS:
+        return TOR_COMMERCIAL_RATE
+    return TOR_RATES[company]
+
+
+def tor_quote(company, product):
+    """Price TOR for one insurer, in the same shape as calculate_premium().
+
+    Returns None when the insurer does not offer TOR. Uses _extract_levies(),
+    the existing gross-inclusive convention, so the customer pays exactly the
+    published figure and the levy/duty are split back out for display rather
+    than added on top.
+    """
+    gross = tor_rate(company, product)
+    if gross is None:
+        return None
+    levies, net_base = _extract_levies(gross)
+    return {
+        'base_premium':     net_base,
+        'levies_and_taxes': levies,
+        'total_payable':    gross,
+        'period_breakdown': {},
+        'psv_table':        False,
+        'insurer':          (company or '').title(),
+        'rates_only':       True,
+    }
 
 
 MONARCH_TP_INSTALLMENT_OVERRIDE = {

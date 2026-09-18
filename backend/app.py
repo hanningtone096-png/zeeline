@@ -70,6 +70,8 @@ from premium_calc import (
     INSTALLMENT_COUNTS,
     COMMERCIAL_VIRTUAL_PRODUCT,
     resolve_commercial_product,
+    tor_quote,
+    COMING_SOON_INSURERS,
 )
 
 # ── Rate limiting (flask-limiter) ─────────────────────────────────────────────
@@ -2113,7 +2115,10 @@ def quotation_premium_comparison():
     product = (d.get('product') or '').strip()
     cover = (d.get('type_of_cover') or '').strip()
     certificate = (d.get('type_of_certificate') or '').strip()
-    if not all((product, cover, certificate)):
+    # TOR is a flat, rates-only figure with no certificate period, so it is the
+    # one case where a certificate type is not required.
+    is_tor = bool(d.get('is_tor'))
+    if not product or not cover or not (certificate or is_tor):
         return jsonify({"error": "Product, cover type and certificate type are required."}), 400
     try:
         value = float(d.get('vehicle_value', 0) or 0)
@@ -2139,6 +2144,27 @@ def quotation_premium_comparison():
         else:
             company_product, company_sub_type = product, sub_type
 
+        if is_tor:
+            # TOR is rates-only: a flat gross figure shown for comparison, but
+            # never selectable, never persisted and never issued. See the is_tor
+            # rejection in generate_quotation() and buy_cover().
+            tor = tor_quote(company, company_product)
+            if tor is None:
+                comparisons.append({"company": company, "available": False,
+                                    "reason": "This insurer does not offer TOR for this vehicle."})
+                continue
+            comparisons.append({
+                "company": company,
+                "available": True,
+                "selectable": False,
+                "coming_soon": False,
+                "rates_only": True,
+                "base_premium": tor["base_premium"],
+                "levies_and_taxes": tor["levies_and_taxes"],
+                "total_payable": tor["total_payable"],
+            })
+            continue
+
         if not insurer_offers(company, company_product, cover):
             comparisons.append({"company": company, "available": False,
                                 "reason": "This insurer does not offer this product and cover."})
@@ -2155,9 +2181,13 @@ def quotation_premium_comparison():
         except (UnsupportedInsurerProductError, TypeError, ValueError) as exc:
             comparisons.append({"company": company, "available": False, "reason": str(exc)})
             continue
+        # A coming-soon insurer still shows its real price, but carries no Choose
+        # button so it can never become data.company.
         comparisons.append({
             "company": company,
             "available": True,
+            "selectable": company not in COMING_SOON_INSURERS,
+            "coming_soon": company in COMING_SOON_INSURERS,
             "base_premium": calculation["base_premium"],
             "levies_and_taxes": calculation["levies_and_taxes"],
             "total_payable": calculation["total_payable"],
@@ -4019,6 +4049,26 @@ def generate_quotation():
 
     if business_type not in {'new', 'extension'}:
         return jsonify({"error": "Business type must be New Business or Extension."}), 400
+
+    # TOR is a rates-only estimate: the wizard displays and prices it, but it
+    # must never become a quotation. This is the only place a quotation is ever
+    # written, so rejecting it here is what actually guarantees that.
+    if d.get('is_tor'):
+        return jsonify({"error": "TOR is a rates-only estimate and cannot be quoted or issued."}), 400
+
+    if company in COMING_SOON_INSURERS:
+        return jsonify({"error": f"{(d.get('company') or '').title()} is not available for new "
+                                 f"business yet."}), 400
+
+    # Guard the certificate against the period catalog. Without this, a
+    # certificate this insurer/product/cover does not offer — a retired 30_days,
+    # or an installment for an insurer that no longer sells them — falls through
+    # the unguarded PERIOD_FACTORS lookup in _period_base(), is priced as annual,
+    # and gets persisted.
+    if cert not in available_periods(company, product, cover):
+        return jsonify({"error": f"{cert.replace('_', ' ').title()} is not available for "
+                                 f"{(d.get('company') or '').title()} {product.replace('_', ' ')}."}), 400
+
     if cert in INSTALLMENT_COUNTS and cert not in allowed_installments(company, product):
         return jsonify({"error": f"{cert.replace('_', ' ').title()} is not available for "
                                   f"{(d.get('company') or '').title()} {product.replace('_', ' ')}."}), 400

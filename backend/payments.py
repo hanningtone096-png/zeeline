@@ -24,6 +24,10 @@ from functools import wraps
 import requests
 from flask import Blueprint, request, jsonify, session, abort
 
+# premium_calc is a pure module (stdlib only), so importing it here does not
+# create the app.py <-> payments.py cycle this module otherwise avoids.
+from premium_calc import COMING_SOON_INSURERS
+
 log = logging.getLogger(__name__)
 
 payments_bp = Blueprint('payments', __name__, url_prefix='/api')
@@ -337,6 +341,15 @@ def buy_cover():
         return jsonify({"error": "You do not have access to this quotation"}), 403
     if q['status'] == 'converted':
         return jsonify({"error": "Policy already created for this quotation"}), 409
+
+    # A coming-soon insurer's rates are shown for comparison but it cannot be
+    # sold. Checked at generation too, but quotations written BEFORE an insurer
+    # was withdrawn can still be sitting in 'pending' and would otherwise remain
+    # purchasable — and since issuance is enqueued from here, this is the last
+    # point that can stop a certificate being requested.
+    if (q.get('company') or '').lower() in COMING_SOON_INSURERS:
+        return jsonify({"error": f"{(q.get('company') or '').title()} is not available for new "
+                                  f"business yet."}), 400
 
     client = _query("""
         SELECT id FROM clients
