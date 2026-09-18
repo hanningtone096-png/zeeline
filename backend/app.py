@@ -3515,6 +3515,293 @@ def confirm_password_reset():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# DASHBOARD OVERVIEW (the dashboard page's KPIs, charts and recent table)
+# ─────────────────────────────────────────────────────────────────────────────
+
+MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+# Fixed palette for the portfolio donut, assigned here rather than in the
+# template so an arc and its legend swatch can never disagree.
+PORTFOLIO_COLORS = ['#2563eb', '#0ea5e9', '#14b8a6', '#f59e0b', '#8b5cf6', '#94a3b8']
+
+POLICY_STATUS_LABELS = {
+    'active':          'Active',
+    'pending_payment': 'Pending Payment',
+    'expired':         'Expired',
+    'cancelled':       'Cancelled',
+    'suspended':       'Suspended',
+}
+
+
+def _dash_dt(value):
+    """Lenient timestamp parser for stored created_at values.
+
+    Legacy documents can hold a datetime, a date, or an ISO string. Returns
+    None instead of raising so a single malformed row cannot take the whole
+    dashboard down."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day)
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value[:19], fmt)
+            except ValueError:
+                continue
+    return None
+
+
+def _dash_ym(value):
+    """(year, month) bucket key for a stored timestamp, or None."""
+    dt = _dash_dt(value)
+    return (dt.year, dt.month) if dt else None
+
+
+def _prev_month(ym):
+    year, month = ym
+    return (year - 1, 12) if month == 1 else (year, month - 1)
+
+
+def _same_owner(value, user_id):
+    try:
+        return int(value) == int(user_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def _month_over_month(cur, prev):
+    """Trend numbers for a KPI pill.
+
+    delta_pct is None when there is no prior month to compare against — the
+    template shows the absolute change instead of an infinite or a
+    misleading 100%."""
+    cur, prev = float(cur or 0), float(prev or 0)
+    delta_abs = cur - prev
+    if prev == 0:
+        return {'delta_pct': None, 'delta_abs': delta_abs,
+                'direction': 'up' if delta_abs > 0 else ('down' if delta_abs < 0 else 'flat')}
+    pct = (delta_abs / prev) * 100.0
+    direction = 'flat' if abs(pct) < 0.05 else ('up' if pct > 0 else 'down')
+    return {'delta_pct': round(pct, 1), 'delta_abs': delta_abs, 'direction': direction}
+
+
+def _count(value):
+    """Thousands-separated count for a card value."""
+    return f"{int(value or 0):,}"
+
+
+def _money(value):
+    """Compact KES for a card value: KES 1.23M / KES 45.6K."""
+    value = float(value or 0)
+    if abs(value) >= 1_000_000:
+        return f"KES {value / 1_000_000:.2f}M"
+    if abs(value) >= 1_000:
+        return f"KES {value / 1_000:.1f}K"
+    return f"KES {value:,.0f}"
+
+
+def _client_display_name(row):
+    if not row:
+        return '—'
+    name = ' '.join(p for p in (row.get('first_name'), row.get('last_name')) if p).strip()
+    return name or (row.get('phone') or '—')
+
+
+def _cover_label(cover):
+    return COVER_TYPE_LABELS.get(cover or '', (cover or '—').replace('_', ' ').title())
+
+
+def build_dashboard_overview(role, user_id, name=None, today=None):
+    """Assemble everything the dashboard page renders, for one caller.
+
+    Every figure is derived in Python from plain row fetches rather than from
+    SQL aggregates. That is not a style preference: the Mongo shim behind
+    `query()` understands only two aggregate spellings, has no date functions
+    at all, silently ignores GROUP BY, and silently DROPS any WHERE clause it
+    cannot parse — so a date-bucketed, period-filtered summary cannot be
+    expressed in SQL against this backend. Fetching rows and bucketing here is
+    the same idiom as build_report_data() and mongo_store._agent_summary().
+    """
+    today    = today or date.today()
+    is_admin = (role == 'admin')
+    ym_now   = (today.year, today.month)
+    ym_prev  = _prev_month(ym_now)
+
+    if is_admin:
+        policy_rows = query("SELECT * FROM policies ORDER BY created_at DESC")
+        client_rows = query("SELECT * FROM clients ORDER BY created_at DESC")
+        claim_rows  = query("SELECT * FROM claims ORDER BY created_at DESC")
+    else:
+        policy_rows = query("SELECT * FROM policies WHERE agent_id=%s ORDER BY created_at DESC", (user_id,))
+        client_rows = query("SELECT * FROM clients WHERE agent_id=%s ORDER BY created_at DESC", (user_id,))
+        claim_rows  = query("SELECT * FROM claims WHERE agent_id=%s ORDER BY created_at DESC", (user_id,))
+
+    # Agent scoping is re-asserted in Python rather than trusted to the WHERE
+    # clause above. _where_filter() drops any clause it cannot parse, silently
+    # and without consuming its parameter, so a filter that stopped matching
+    # would quietly return the whole book. Failing closed here means the worst
+    # case is an empty dashboard, not another agent's data.
+    if not is_admin:
+        policy_rows = [r for r in policy_rows if _same_owner(r.get('agent_id'), user_id)]
+        client_rows = [r for r in client_rows if _same_owner(r.get('agent_id'), user_id)]
+        claim_rows  = [r for r in claim_rows if _same_owner(r.get('agent_id'), user_id)]
+
+    # One pass over each collection, bucketed by (year, month) — so December
+    # into January needs no special case below.
+    policy_count, premium_written, client_count, claim_count = {}, {}, {}, {}
+    for row in policy_rows:
+        key = _dash_ym(row.get('created_at'))
+        if not key:
+            continue
+        policy_count[key] = policy_count.get(key, 0) + 1
+        # Gross written premium counts every policy, including ones later
+        # cancelled, so this stays a flow (what was written) and does not fall
+        # when a policy lapses. Deliberate: the user asked for every policy.
+        premium_written[key] = premium_written.get(key, 0.0) + float(row.get('total_payable') or 0)
+    for row in client_rows:
+        key = _dash_ym(row.get('created_at'))
+        if key:
+            client_count[key] = client_count.get(key, 0) + 1
+    for row in claim_rows:
+        key = _dash_ym(row.get('created_at'))
+        if key:
+            claim_count[key] = claim_count.get(key, 0) + 1
+
+    # ── KPIs ────────────────────────────────────────────────────────────────
+    # Two of these are stocks (what is on the books right now) and two are
+    # flows (what was written/filed this month), while every trend pill is
+    # month-over-month on the flow. Each card therefore carries a caption
+    # naming what it counts and a delta_caption naming what the pill compares,
+    # so "412 active, +12.5%" can never read as "the book grew 12.5%".
+    active_rows  = [r for r in policy_rows if (r.get('status') or '') == 'active']
+    pending_rows = [r for r in claim_rows if (r.get('status') or '') == 'pending']
+
+    premium_mtd = premium_written.get(ym_now, 0.0)
+    cur_pol, prev_pol = policy_count.get(ym_now, 0), policy_count.get(ym_prev, 0)
+    cur_cli, prev_cli = client_count.get(ym_now, 0), client_count.get(ym_prev, 0)
+    cur_clm, prev_clm = claim_count.get(ym_now, 0), claim_count.get(ym_prev, 0)
+
+    def kpi(key, label, caption, value, display, cur, prev, icon, tone, fmt):
+        trend = _month_over_month(cur, prev)
+        trend['delta_caption'] = (
+            f"{fmt(cur)} this month vs {fmt(prev)} last month"
+        )
+        # Shown instead of delta_pct when there is no prior month to divide by,
+        # so the pill still reads sensibly (and still carries the currency).
+        sign = '+' if trend['delta_abs'] > 0 else ('-' if trend['delta_abs'] < 0 else '')
+        trend['delta_display'] = f"{sign}{fmt(abs(trend['delta_abs']))}"
+        return {'key': key, 'label': label, 'caption': caption,
+                'value': value, 'display': display, 'icon': icon, 'tone': tone, **trend}
+
+    kpis = [
+        kpi('policies', 'Total Policies', 'Active now',
+            len(active_rows), _count(len(active_rows)),
+            cur_pol, prev_pol, 'fa-file-shield', 'blue', _count),
+        kpi('clients', 'Active Clients', 'On the books',
+            len(client_rows), _count(len(client_rows)),
+            cur_cli, prev_cli, 'fa-users', 'green', _count),
+        kpi('claims', 'Pending Claims', 'Awaiting decision',
+            len(pending_rows), _count(len(pending_rows)),
+            cur_clm, prev_clm, 'fa-clipboard-list', 'amber', _count),
+        kpi('premium', 'Premium Written (MTD)', 'Gross written, all statuses',
+            premium_mtd, _money(premium_mtd),
+            premium_mtd, premium_written.get(ym_prev, 0.0), 'fa-coins', 'violet', _money),
+    ]
+
+    # ── Premium trend: this year vs last year, by month ─────────────────────
+    this_year = [round(premium_written.get((today.year, m), 0.0), 2) for m in range(1, 13)]
+    last_year = [round(premium_written.get((today.year - 1, m), 0.0), 2) for m in range(1, 13)]
+
+    # ── Portfolio mix ───────────────────────────────────────────────────────
+    # Active only, matching the Total Policies card above: two different
+    # figures must never both be labelled "Total Policies" on one screen.
+    mix_counts = {}
+    for row in active_rows:
+        cover = row.get('type_of_cover') or 'unknown'
+        mix_counts[cover] = mix_counts.get(cover, 0) + 1
+    mix_total = sum(mix_counts.values())
+    # Deterministic tie-break on the cover name so the legend order is stable
+    # between requests (Counter.most_common would order ties arbitrarily).
+    top = sorted(mix_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+    slices, shown = [], 0
+    for idx, (cover, count) in enumerate(top):
+        shown += count
+        slices.append({'label': _cover_label(cover), 'value': count,
+                       'pct': round(count * 100.0 / mix_total, 1) if mix_total else 0.0,
+                       'color': PORTFOLIO_COLORS[idx]})
+    remainder = mix_total - shown
+    if remainder > 0:
+        slices.append({'label': 'Other', 'value': remainder,
+                       'pct': round(remainder * 100.0 / mix_total, 1),
+                       'color': PORTFOLIO_COLORS[-1]})
+
+    # ── Recent policies ─────────────────────────────────────────────────────
+    # Re-sorted in Python rather than trusting the row order: a legacy row with
+    # a string or missing created_at would otherwise sort unpredictably.
+    recent_rows = sorted(policy_rows,
+                         key=lambda r: (_dash_dt(r.get('created_at')) or datetime.min),
+                         reverse=True)[:5]
+    name_cache, recent = {}, []
+    for row in recent_rows:
+        cid = row.get('client_id')
+        if cid is not None and cid not in name_cache:
+            name_cache[cid] = query("SELECT * FROM clients WHERE id=%s", (cid,), fetchone=True)
+        premium = float(row.get('total_payable') or 0)
+        status  = row.get('status') or 'unknown'
+        recent.append({
+            'policy_no':       row.get('policy_no') or '—',
+            'client':          _client_display_name(name_cache.get(cid)),
+            'cover':           _cover_label(row.get('type_of_cover')),
+            'vehicle_reg':     row.get('vehicle_reg') or '',
+            'premium':         premium,
+            'premium_display': f"KES {premium:,.0f}",
+            'status':          status,
+            'status_label':    POLICY_STATUS_LABELS.get(status, status.replace('_', ' ').title()),
+        })
+
+    return {
+        'role':         role,
+        'name':         name,
+        'generated_at': datetime.utcnow().isoformat(timespec='seconds'),
+        'currency':     'KES',
+        'kpis':         kpis,
+        'premium_trend': {
+            'labels':    MONTH_ABBR,
+            'this_year': this_year,
+            'last_year': last_year,
+            'year':      today.year,
+            'prev_year': today.year - 1,
+        },
+        'portfolio_mix': {'total': mix_total, 'slices': slices,
+                          'center_label': 'Total Policies'},
+        'recent_policies': recent,
+    }
+
+
+@app.route('/api/dashboard/overview')
+@login_required
+@cached_response("cache:dashboard_overview", ttl=30)
+def dashboard_overview():
+    """Serve the dashboard page's KPIs, charts and recent-policies table.
+
+    Separate from /api/dashboard/stats, and so a separate cache prefix:
+    cached_response() builds its key from the prefix, the user and the query
+    string only — the request path is NOT part of it — so reusing
+    "cache:dashboard" would let the two endpoints serve each other's payload.
+    No new invalidation is needed: cache_delete_prefix() matches on the prefix,
+    so the existing cache_delete_prefix("cache:dashboard") call sites already
+    clear this one too.
+    """
+    try:
+        return jsonify(build_dashboard_overview(
+            session.get('role'), session.get('user_id'), name=session.get('name')))
+    except Exception as e:
+        return safe_error_response(e, "Could not load the dashboard.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # DASHBOARD STATS
 # ─────────────────────────────────────────────────────────────────────────────
 
