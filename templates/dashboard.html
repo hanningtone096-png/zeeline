@@ -17,9 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<!-- Pinned: Chart.js 5 changes option/plugin APIs and both charts here use v4
-     syntax. An unpinned "latest" would break the charts on the next major. -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -53,146 +51,49 @@
         <li><a href="/privacy"><i class="fas fa-shield-alt"></i> privacy policy</a></li>
         <li><a href="/terms"><i class="fas fa-gavel"></i> terms and conditions</a></li>
     </ul>
-
-    <!-- Signed-in user, pinned to the bottom of the sidebar. Populated from
-         the dashboard payload in JS so it shows the real name and role. -->
-    <div class="sidebar-user">
-        <div class="sidebar-user-avatar" id="sidebarAvatar" aria-hidden="true">–</div>
-        <div class="sidebar-user-meta">
-            <span class="sidebar-user-name" id="sidebarName">—</span>
-            <span class="sidebar-user-role" id="sidebarRole">—</span>
-        </div>
-        <button type="button" class="sidebar-user-logout" onclick="logout()" aria-label="Log out">
-            <i class="fas fa-arrow-right-from-bracket" aria-hidden="true"></i>
-        </button>
-    </div>
 </aside>
 
 <main class="main-content">
 
     <div class="top-header">
-        <div class="topbar-heading">
-            <h1 class="topbar-title" id="dashTitle">Dashboard</h1>
-            <p class="topbar-sub">Welcome back, <span id="welcome">—</span><span class="topbar-role" id="roleTag"></span></p>
-        </div>
-
-        <div class="topbar-actions">
-            <!-- Double-insurance check. Submits on Enter or the button only —
-                 never on input, because the endpoint makes a live DMVIC call
-                 and is rate-limited to 20/minute. -->
-            <form class="topbar-search" id="topbarSearchForm" role="search"
-                  onsubmit="event.preventDefault(); checkDoubleInsurance();">
-                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                <input type="search" id="doubleInsuranceQuery" autocomplete="off"
-                       placeholder="Check double insurance — reg or chassis no."
-                       aria-label="Check double insurance by vehicle registration or chassis number">
-                <button type="submit" class="topbar-search-btn" id="topbarSearchBtn"
-                        aria-label="Run the double insurance check">
-                    <i class="fas fa-arrow-right" aria-hidden="true"></i>
-                </button>
-            </form>
+        <h2>Welcome, <span id="welcome">—</span> <span id="roleTag" style="font-size:12px; background:#eff6ff; color:#2563eb; padding:3px 10px; border-radius:99px; font-weight:600; vertical-align:middle;"></span></h2>
+        <div style="display:flex;align-items:center;gap:10px;">
             {% include '_notifications.html' %}
-            <a class="btn-new-policy" href="/quotation">
-                <i class="fas fa-plus" aria-hidden="true"></i><span>New Policy</span>
-            </a>
-            <div class="topbar-avatar" id="topbarAvatar" aria-hidden="true">–</div>
+            <button onclick="logout()" class="logout-btn">Logout</button>
         </div>
     </div>
-
-    <!-- One-line verdict from the topbar check, so the answer is visible
-         without scrolling down to the full result tables. -->
-    <div class="topbar-check-result" id="topbarCheckResult" role="status" aria-live="polite" hidden></div>
 
     <!-- ── Mobile quick-jump nav — lets admins skip straight to a section
          instead of scrolling past everything on a phone screen. Hidden on
          desktop (see dashboard.css); populated per-role in JS below. ── -->
     <nav class="quick-jump-nav" id="quickJumpNav" aria-label="Jump to section"></nav>
 
+    <!-- Double Insurance Check -->
+    <div class="section-card" id="sectionDoubleCheck">
+        <h3><i class="fas fa-search" style="color:#2563eb;"></i> Check for Double Insurance</h3>
+        <p style="font-size:13px;color:#64748b;margin-top:-6px;">
+            Search by vehicle registration or chassis number to see if it already has an active policy,
+            before submitting a new quote — the same check DMVIC runs at issuance (their "ER005" error).
+        </p>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <input type="text" id="doubleInsuranceQuery" placeholder="e.g. KAA 123A or chassis number"
+                   style="flex:1; min-width:220px; padding:10px 14px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px;"
+                   onkeydown="if(event.key==='Enter') checkDoubleInsurance();">
+            <button class="btn-primary" onclick="checkDoubleInsurance()" style="padding:10px 20px; border:none; border-radius:8px; cursor:pointer; font-weight:600;">
+                <i class="fas fa-search"></i> Check
+            </button>
+        </div>
+        <div id="doubleInsuranceResults" style="margin-top:14px;"></div>
+    </div>
+
     <!-- KPI cards -->
-    <div class="stats-grid dash-kpi-grid" id="statsGrid"></div>
+    <div class="stats-grid" id="statsGrid"></div>
 
-    <!-- Charts: premium trend + portfolio mix -->
-    <div class="chart-grid">
-        <div class="section-card chart-panel">
-            <div class="panel-head">
-                <div>
-                    <h3><i class="fas fa-chart-line" style="color:#2563eb;"></i> Premium Trend</h3>
-                    <p class="panel-sub">Premium written by month</p>
-                </div>
-                <div class="chart-legend">
-                    <span><i class="legend-dot" style="background:#0f172a;"></i> This Year</span>
-                    <span><i class="legend-dot" style="background:#cbd5e1;"></i> Last Year</span>
-                </div>
-            </div>
-            <div class="chart-canvas-wrap">
-                <canvas id="trendChart" height="110" aria-label="Premium written by month, this year versus last year"></canvas>
-            </div>
-            <div class="chart-empty" id="trendEmpty" hidden>
-                <i class="fas fa-chart-line" aria-hidden="true"></i>
-                <p>No premium written yet.</p>
-            </div>
-        </div>
-
-        <div class="section-card chart-panel">
-            <div class="panel-head">
-                <div>
-                    <h3><i class="fas fa-chart-pie" style="color:#2563eb;"></i> Portfolio Mix</h3>
-                    <p class="panel-sub">Active policies by cover</p>
-                </div>
-            </div>
-            <div class="donut-wrap">
-                <canvas id="mixChart" aria-label="Active policies by cover type"></canvas>
-                <div class="donut-center">
-                    <span class="donut-total" id="mixTotal">—</span>
-                    <span class="donut-caption">Total Policies</span>
-                </div>
-            </div>
-            <div class="donut-legend" id="mixLegend"></div>
-        </div>
+    <!-- Chart -->
+    <div class="section-card">
+        <h3><i class="fas fa-chart-bar" style="color:#2563eb;"></i> Performance Overview</h3>
+        <canvas id="mainChart" height="90"></canvas>
     </div>
-
-    <!-- Recent policies -->
-    <div class="section-card" id="sectionRecentPolicies">
-        <div class="panel-head">
-            <div>
-                <h3><i class="fas fa-clock-rotate-left" style="color:#2563eb;"></i> Recent Policies</h3>
-                <p class="panel-sub">Five most recently written</p>
-            </div>
-            <a class="panel-link" href="/renewals">View all <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
-        </div>
-        <div class="table-scroll">
-            <table class="agent-table responsive-table" id="recentPoliciesTable">
-                <thead>
-                    <tr>
-                        <th scope="col">Policy No</th>
-                        <th scope="col">Client</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Premium</th>
-                        <th scope="col">Status</th>
-                    </tr>
-                </thead>
-                <tbody id="recentPoliciesBody"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Double Insurance Check — full result tables. The search box itself
-         lives in the topbar; this stays as the detail surface it renders into,
-         and as a quick-jump target. -->
-    <details class="section-card collapsible-section" id="sectionDoubleCheck">
-        <summary>
-            <h3><i class="fas fa-search" style="color:#2563eb;"></i> Double Insurance Detail</h3>
-            <i class="fas fa-chevron-down chevron"></i>
-        </summary>
-        <div class="collapsible-body">
-            <p style="font-size:13px;color:#64748b;margin-top:-6px;">
-                Search by vehicle registration or chassis number in the field at the top of the page to see
-                whether a vehicle already has cover, before submitting a new quote — the same check DMVIC
-                runs at issuance (their "ER005" error).
-            </p>
-            <div id="doubleInsuranceResults" style="margin-top:14px;"></div>
-        </div>
-    </details>
 
     <!-- ── ADMIN ONLY PANELS ── -->
     <div id="adminSection" style="display:none;">
@@ -416,25 +317,7 @@
 </div>
 
 <script>
-// ── Chart registry ────────────────────────────────────────────────────────
-// Keyed per canvas so a re-render (the 'online' handler below reloads the
-// whole dashboard) destroys the previous instance rather than drawing a second
-// chart over the first. Chart.js is pinned in <head>; if the CDN is blocked
-// these mounts no-op and the rest of the page still works.
-const charts = {};
-
-function mountChart(key, canvasId, config) {
-    if (typeof Chart === 'undefined') return null;
-    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return null;
-    charts[key] = new Chart(canvas, config);
-    return charts[key];
-}
-
-function dropChart(key) {
-    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
-}
+let chartInstance = null;
 
 // CSRF token, read once from the meta tag rendered by Flask-WTF.
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
@@ -444,18 +327,15 @@ function withCsrf(headers = {}) {
 }
 
 async function loadDashboard() {
-    const recentBody = document.getElementById('recentPoliciesBody');
-    if (recentBody) recentBody.innerHTML = skeletonRowsHTML(5, 5);
-
     try {
-        const res = await fetch('/api/dashboard/overview');
+        const res = await fetch('/api/dashboard/stats');
         // Only bounce to /login on a genuine auth rejection (401/403). Any
         // other non-OK status (500/502/503/404) means the session is probably
         // still valid and redirecting to /login would just bounce back here,
         // causing an infinite reload loop. Surface a retry link instead.
         if (res.status === 401 || res.status === 403) { window.location.href = '/login'; return; }
         if (!res.ok) {
-            console.error('Dashboard request failed:', res.status);
+            console.error('Dashboard stats request failed:', res.status);
             const el = document.getElementById('welcome');
             if (el) el.insertAdjacentHTML('afterend',
                 '<p style="color:#b91c1c;padding:8px 0">Could not load dashboard data. ' +
@@ -464,45 +344,29 @@ async function loadDashboard() {
         }
         const d = await res.json();
 
-        // One endpoint serves both roles: the agent scoping happens server-side
-        // in build_dashboard_overview(). Nothing here may filter by agent, or an
-        // admin's own figures would be silently reduced to one agent's.
-        renderKpis(d.kpis || []);
-        renderPremiumTrend(d.premium_trend || {});
-        renderPortfolioMix(d.portfolio_mix || {});
-        renderRecentPolicies(d.recent_policies || []);
+        document.getElementById('welcome').innerText  = d.name || 'User';
+        document.getElementById('roleTag').innerText  = (d.role || '').toUpperCase();
 
-        const name = d.name || 'User';
-        const role = d.role || '';
-        const setText = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
-        const initials = name.split(/\s+/).filter(Boolean).slice(0, 2)
-                             .map(w => w[0].toUpperCase()).join('') || '–';
-
-        setText('welcome', name);
-        setText('roleTag', role ? ' · ' + role.toUpperCase() : '');
-        setText('topbarAvatar', initials);
-        setText('sidebarAvatar', initials);
-        setText('sidebarName', name);
-        setText('sidebarRole', role === 'admin' ? 'Administrator' : 'Agent');
-
-        if (role === 'admin') {
+        if (d.role === 'admin') {
+            renderAdminStats(d);
             document.getElementById('adminSection').style.display = 'block';
             buildQuickJumpNav([
-                { href: '#sectionRecentPolicies', label: 'Recent',       icon: 'fa-clock-rotate-left' },
-                { href: '#sectionReports',        label: 'Reports',      icon: 'fa-file-download' },
-                { href: '#sectionAgents',         label: 'Pending',      icon: 'fa-users-cog' },
-                { href: '#sectionDmvic',          label: 'DMVIC',        icon: 'fa-triangle-exclamation' },
-                { href: '#sectionDeclarations',   label: 'Declarations', icon: 'fa-stamp' },
+                { href: '#sectionDoubleCheck', label: 'Double Check', icon: 'fa-search' },
+                { href: '#sectionReports',     label: 'Reports',      icon: 'fa-file-download' },
+                { href: '#sectionAgents',      label: 'Pending',      icon: 'fa-users-cog' },
+                { href: '#sectionDmvic',       label: 'DMVIC',        icon: 'fa-triangle-exclamation' },
+                { href: '#sectionDeclarations',label: 'Declarations', icon: 'fa-stamp' },
             ]);
             loadAgents();
             loadReportSummary();
             loadDeclarations();
             loadDmvicConfirmations();
         } else {
+            renderAgentStats(d);
             document.getElementById('agentSection').style.display = 'block';
             buildQuickJumpNav([
-                { href: '#sectionRecentPolicies', label: 'Recent',      icon: 'fa-clock-rotate-left' },
-                { href: '#sectionPolicies',       label: 'My Policies', icon: 'fa-shield-alt' },
+                { href: '#sectionDoubleCheck', label: 'Double Check', icon: 'fa-search' },
+                { href: '#sectionPolicies',    label: 'My Policies',  icon: 'fa-shield-alt' },
             ]);
             loadPolicies();
         }
@@ -535,221 +399,142 @@ function buildQuickJumpNav(items) {
     });
 }
 
-// The check field now lives in the topbar rather than in a section far down the
-// page, so the mobile pill just brings the cursor to it.
 document.getElementById('mabDoubleCheck')?.addEventListener('click', (e) => {
     e.preventDefault();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const target = document.getElementById('sectionDoubleCheck');
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     document.getElementById('doubleInsuranceQuery')?.focus();
 });
 
-// ── KPI cards ─────────────────────────────────────────────────────────────
-// Values and deltas are both formatted server-side, so the card, the donut
-// centre and the chart can never disagree about the same figure.
-const KPI_TONE = {
-    blue:   { bg: '#eff6ff', color: '#2563eb' },
-    green:  { bg: '#f0fdf4', color: '#16a34a' },
-    amber:  { bg: '#fffbeb', color: '#d97706' },
-    violet: { bg: '#f5f3ff', color: '#7c3aed' },
-};
-
-function trendPill(k) {
-    const dir  = k.direction || 'flat';
-    const icon = dir === 'up'   ? 'fa-arrow-trend-up'
-               : dir === 'down' ? 'fa-arrow-trend-down'
-               : 'fa-minus';
-    // No prior month to compare against (prev was 0) — show the absolute
-    // change instead of an infinite or invented percentage. delta_caption
-    // spells the comparison out in words for the tooltip either way.
-    const text = (k.delta_pct === null || k.delta_pct === undefined)
-        ? (k.delta_display || '0')
-        : `${k.delta_pct > 0 ? '+' : ''}${k.delta_pct}%`;
-    return `<div class="trend ${dir}" title="${esc(k.delta_caption || '')}">
-                <i class="fas ${icon}" aria-hidden="true"></i> ${esc(text)}
-                <span class="trend-when">vs last month</span>
-            </div>`;
+function renderAdminStats(d) {
+    const items = [
+        { icon:'fas fa-users',         color:'#3b82f6', bg:'#eff6ff', label:'Total Clients',   value: d.total_clients,   ...trendOf(d,'clients_delta')   },
+        { icon:'fas fa-user-tie',      color:'#8b5cf6', bg:'#f5f3ff', label:'Agents',           value: d.total_agents,    ...trendOf(d,'agents_delta')    },
+        { icon:'fas fa-file-invoice',  color:'#10b981', bg:'#f0fdf4', label:'Quotations',        value: d.total_quotes,    ...trendOf(d,'quotes_delta')    },
+        { icon:'fas fa-shield-alt',    color:'#f59e0b', bg:'#fffbeb', label:'Active Policies',   value: d.active_policies, ...trendOf(d,'policies_delta')  },
+        { icon:'fas fa-coins',         color:'#ef4444', bg:'#fef2f2', label:"Today's Premium",   value: 'KES ' + Number(d.total_premium).toLocaleString(), ...trendOf(d,'premium_delta') },
+    ];
+    renderStatCards(items);
+    renderChart(
+        ['Clients', 'Agents', 'Quotations', 'Policies'],
+        [d.total_clients, d.total_agents, d.total_quotes, d.active_policies]
+    );
 }
 
-function renderKpis(kpis) {
-    const grid = document.getElementById('statsGrid');
-    if (!grid) return;
-    grid.innerHTML = kpis.map(k => {
-        const tone = KPI_TONE[k.tone] || KPI_TONE.blue;
+function renderAgentStats(d) {
+    const items = [
+        { icon:'fas fa-users',        color:'#3b82f6', bg:'#eff6ff', label:'My Clients',  value: d.my_clients,  ...trendOf(d,'my_clients_delta')  },
+        { icon:'fas fa-file-invoice', color:'#10b981', bg:'#f0fdf4', label:'Quotations',   value: d.my_quotes,   ...trendOf(d,'my_quotes_delta')   },
+        { icon:'fas fa-shield-alt',   color:'#f59e0b', bg:'#fffbeb', label:'Active Policies', value: d.my_active, ...trendOf(d,'my_active_delta') },
+        { icon:'fas fa-coins',        color:'#8b5cf6', bg:'#f5f3ff', label:'My Premium',   value: 'KES ' + Number(d.my_premium).toLocaleString(), ...trendOf(d,'my_premium_delta') },
+    ];
+    renderStatCards(items);
+    renderChart(
+        ['Clients', 'Quotes', 'Active Policies'],
+        [d.my_clients, d.my_quotes, d.my_active]
+    );
+}
+
+// Builds a {trend, up} object from an optional backend delta field, so KPI
+// cards show a "+12% ▲" pill only when the API actually sends a delta. Returns
+// {} when absent, which spreads harmlessly into the card config.
+// Accepts either a number (sign infers up/down, formatted as "+N%") or a
+// ready-made string plus an explicit `<key>_up` boolean.
+function trendOf(d, key) {
+    const raw = d[key];
+    if (raw === undefined || raw === null || raw === '') return {};
+    const up = (d[key + '_up'] !== undefined)
+        ? d[key + '_up']
+        : (typeof raw === 'number' ? raw >= 0 : true);
+    const trend = (typeof raw === 'number')
+        ? (raw >= 0 ? '+' : '') + raw + '%'
+        : String(raw);
+    return { trend, up };
+}
+
+function renderStatCards(items) {
+    document.getElementById('statsGrid').innerHTML = items.map(it => {
+        const trend = it.trend
+            ? `<div class="trend ${it.up === false ? 'down' : 'up'}">
+                 <i class="fas fa-arrow-${it.up === false ? 'down' : 'up'}"></i> ${it.trend}
+               </div>`
+            : '';
         return `
-        <div class="stat-card dash-kpi">
-            <div class="dash-kpi-icon" style="background:${tone.bg}; color:${tone.color};">
-                <i class="fas ${esc(k.icon)}" aria-hidden="true"></i>
+        <div class="stat-card">
+            <div class="icon" style="background:${it.bg}; color:${it.color};">
+                <i class="${it.icon}"></i>
             </div>
-            <div class="dash-kpi-body">
-                <span class="dash-kpi-label">${esc(k.label)}</span>
-                <span class="dash-kpi-value">${esc(k.display)}</span>
-                <span class="dash-kpi-caption">${esc(k.caption)}</span>
-                ${trendPill(k)}
-            </div>
+            <div class="value">${it.value ?? '—'}</div>
+            <div class="label">${it.label}</div>
+            ${trend}
         </div>`;
     }).join('');
 }
 
-// ── Premium trend ─────────────────────────────────────────────────────────
-function renderPremiumTrend(t) {
-    const thisYear = t.this_year || [];
-    const lastYear = t.last_year || [];
-    const hasData  = thisYear.some(v => v > 0) || lastYear.some(v => v > 0);
+function renderChart(labels, values) {
+    const ctx = document.getElementById('mainChart');
+    if (chartInstance) chartInstance.destroy();
 
-    const empty = document.getElementById('trendEmpty');
-    const wrap  = document.getElementById('trendChart')?.parentElement;
-    if (empty) empty.hidden = hasData;
-    if (wrap)  wrap.hidden  = !hasData;
-    if (!hasData) { dropChart('trend'); return; }
-
-    // Scriptable fill, built from the chart area so it scales at any size.
-    const areaGradient = (context) => {
-        const { ctx, chartArea } = context.chart;
-        if (!chartArea) return 'rgba(37, 99, 235, 0.12)';
-        const g = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-        g.addColorStop(0, 'rgba(37, 99, 235, 0.02)');
-        g.addColorStop(1, 'rgba(37, 99, 235, 0.22)');
+    // Scriptable fill: a soft vertical gradient (navy bottom → brand blue top),
+    // built from the chart area so it scales correctly at any size. Falls back
+    // to a flat blue before the first layout pass.
+    const barGradient = (context) => {
+        const { chart } = context;
+        const { ctx: c, chartArea } = chart;
+        if (!chartArea) return 'rgba(37, 99, 235, 0.85)';
+        const g = c.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+        g.addColorStop(0, 'rgba(30, 64, 175, 0.35)');   // soft navy base
+        g.addColorStop(1, 'rgba(37, 99, 235, 0.95)');   // brand blue crest
         return g;
     };
 
-    mountChart('trend', 'trendChart', {
-        type: 'line',
+    chartInstance = new Chart(ctx, {
+        type: 'bar',
         data: {
-            labels: t.labels || [],
-            datasets: [
-                {
-                    label: String(t.year ?? 'This Year'),
-                    data: thisYear,
-                    borderColor: '#0f172a',
-                    backgroundColor: areaGradient,
-                    fill: true, tension: .35, borderWidth: 2.5,
-                    pointRadius: 0, pointHoverRadius: 4, pointBackgroundColor: '#0f172a',
-                },
-                {
-                    label: String(t.prev_year ?? 'Last Year'),
-                    data: lastYear,
-                    borderColor: '#cbd5e1',
-                    borderDash: [4, 4],
-                    fill: false, tension: .35, borderWidth: 2,
-                    pointRadius: 0, pointHoverRadius: 4, pointBackgroundColor: '#cbd5e1',
-                },
-            ],
+            labels,
+            datasets: [{
+                label: 'Overview',
+                data: values,
+                backgroundColor: barGradient,
+                hoverBackgroundColor: 'rgba(234, 88, 12, 0.92)',  // brand orange on hover
+                borderRadius: 8,
+                borderSkipped: false,
+                barPercentage: 0.6,
+                categoryPercentage: 0.7,
+            }]
         },
         options: {
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
             plugins: {
-                // Off on purpose: the two-entry legend is hand-rolled in the
-                // panel head so it can sit top-right where Chart.js cannot.
                 legend: { display: false },
                 tooltip: {
-                    backgroundColor: '#0f172a', titleColor: '#f1f5f9',
-                    bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8,
-                    callbacks: {
-                        label: (item) => ` ${item.dataset.label}: KES ${Number(item.parsed.y).toLocaleString()}`,
-                    },
-                },
+                    backgroundColor: '#0f172a',
+                    titleColor: '#f1f5f9',
+                    bodyColor: '#cbd5e1',
+                    padding: 10,
+                    cornerRadius: 8,
+                    displayColors: false,
+                    callbacks: { label: (item) => ` ${item.parsed.y}` }
+                }
             },
             scales: {
                 x: {
-                    grid: { display: false }, border: { display: false },
-                    ticks: { color: '#64748b', font: { size: 11, family: 'Inter' } },
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: { color: '#64748b', font: { size: 12, family: 'Inter' } }
                 },
                 y: {
                     beginAtZero: true,
-                    grid: { color: 'rgba(148, 163, 184, .15)' }, border: { display: false },
+                    grid: { color: 'rgba(148, 163, 184, .15)' },   // subtle gridlines only
+                    border: { display: false },
                     ticks: {
-                        color: '#94a3b8', font: { size: 11, family: 'Inter' }, maxTicksLimit: 5,
-                        callback: (v) => v >= 1e6 ? (v / 1e6) + 'M' : (v >= 1e3 ? (v / 1e3) + 'K' : v),
-                    },
-                },
-            },
-        },
+                        stepSize: 1,
+                        color: '#94a3b8',
+                        font: { size: 12, family: 'Inter' }
+                    }
+                }
+            }
+        }
     });
-}
-
-// ── Portfolio mix ─────────────────────────────────────────────────────────
-function renderPortfolioMix(mix) {
-    const slices = mix.slices || [];
-    const total  = Number(mix.total || 0);
-
-    const totalEl = document.getElementById('mixTotal');
-    if (totalEl) totalEl.innerText = total.toLocaleString();
-
-    const legend = document.getElementById('mixLegend');
-    if (legend) {
-        legend.innerHTML = slices.length
-            ? slices.map(s => `
-                <div class="donut-legend-row">
-                    <span class="legend-dot" style="background:${esc(s.color)};"></span>
-                    <span class="donut-legend-label">${esc(s.label)}</span>
-                    <span class="donut-legend-pct">${esc(String(s.pct))}%</span>
-                </div>`).join('')
-            : '<p class="donut-empty">No active policies yet.</p>';
-    }
-
-    if (!total) { dropChart('mix'); return; }
-
-    mountChart('mix', 'mixChart', {
-        type: 'doughnut',
-        data: {
-            labels: slices.map(s => s.label),
-            datasets: [{
-                data: slices.map(s => s.value),
-                backgroundColor: slices.map(s => s.color),
-                borderWidth: 0, hoverOffset: 6,
-            }],
-        },
-        options: {
-            maintainAspectRatio: false,
-            cutout: '68%',
-            plugins: {
-                legend: { display: false },   // hand-rolled list below the chart
-                tooltip: {
-                    backgroundColor: '#0f172a', titleColor: '#f1f5f9',
-                    bodyColor: '#cbd5e1', padding: 10, cornerRadius: 8,
-                    callbacks: {
-                        // Percentage comes from the server, never recomputed here.
-                        label: (item) => ` ${item.label}: ${item.parsed} (${slices[item.dataIndex]?.pct ?? 0}%)`,
-                    },
-                },
-            },
-        },
-    });
-}
-
-// ── Recent policies ───────────────────────────────────────────────────────
-const POLICY_STATUS_BADGE = {
-    active:          'badge-active',
-    pending_payment: 'badge-pending-payment',
-    expired:         'badge-expired',
-    cancelled:       'badge-cancelled',
-    suspended:       'badge-suspended',
-};
-
-function renderRecentPolicies(rows) {
-    const tbody = document.getElementById('recentPoliciesBody');
-    if (!tbody) return;
-    if (!rows.length) {
-        tbody.innerHTML = emptyRowHTML(5, 'fa-folder-open', 'No policies yet',
-            'A policy appears here once its quote is paid and the certificate is issued.');
-        return;
-    }
-    // Every <td> carries data-label or the responsive-table card layout on
-    // mobile loses its headings (see dashboard.css).
-    tbody.innerHTML = rows.map(r => `
-        <tr>
-            <td data-label="Policy No"><span class="cell-mono">${esc(r.policy_no)}</span></td>
-            <td data-label="Client">
-                ${esc(r.client)}
-                ${r.vehicle_reg ? `<span class="cell-sub">${esc(r.vehicle_reg)}</span>` : ''}
-            </td>
-            <td data-label="Type">${esc(r.cover)}</td>
-            <td data-label="Premium">${esc(r.premium_display)}</td>
-            <td data-label="Status">
-                <span class="badge ${POLICY_STATUS_BADGE[r.status] || ''}">${esc(r.status_label)}</span>
-            </td>
-        </tr>`).join('');
 }
 
 // ── Agents ─────────────────────────────────────────────────────────────────
@@ -1108,58 +893,24 @@ function showToast(msg, type, ms) {
 }
 
 // ── Double Insurance Check ───────────────────────────────────────────────────
-// The field lives in the topbar; these results render into the Double Insurance
-// Detail section below. One fetch feeds both that detail view and a one-line
-// verdict strip under the topbar, so the answer is visible without scrolling.
-let doubleCheckInFlight = false;
-
-function setTopbarVerdict(kind, html) {
-    const box = document.getElementById('topbarCheckResult');
-    if (!box) return;
-    box.className = 'topbar-check-result' + (kind ? ' is-' + kind : '');
-    box.innerHTML = html;
-    box.hidden = false;
-}
-
 async function checkDoubleInsurance() {
     const input = document.getElementById('doubleInsuranceQuery');
     const box   = document.getElementById('doubleInsuranceResults');
-    const q     = (input ? input.value : '').trim();
+    const q     = input.value.trim();
 
     if (q.length < 3) {
         box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Enter at least 3 characters.</p>';
-        setTopbarVerdict('bad', '<i class="fas fa-circle-exclamation"></i> Enter at least 3 characters.');
         return;
     }
 
-    // Enter and the button can both fire before the first response lands. The
-    // endpoint is limited to 20/minute AND makes a live DMVIC call per request,
-    // so a second concurrent one is refused here rather than at the server.
-    if (doubleCheckInFlight) return;
-    doubleCheckInFlight = true;
-    const btn = document.getElementById('topbarSearchBtn');
-    if (btn) btn.disabled = true;
-
     box.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Searching our records and DMVIC…</p>';
-    setTopbarVerdict('', '<i class="fas fa-spinner fa-spin"></i> Checking…');
 
     try {
-        const res = await fetch(`/api/policies/check-double-insurance?query=${encodeURIComponent(q)}`);
-
-        // A 429 comes back as HTML, so res.json() below would throw and the
-        // catch would report a bogus "communication error" for what is really
-        // just a rate limit.
-        if (res.status === 429) {
-            box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Too many checks in a row. Wait a minute and try again.</p>';
-            setTopbarVerdict('warn', '<i class="fas fa-hourglass-half"></i> Too many checks — wait a minute.');
-            return;
-        }
-
+        const res  = await fetch(`/api/policies/check-double-insurance?query=${encodeURIComponent(q)}`);
         const data = await res.json();
 
         if (!res.ok) {
             box.innerHTML = `<p style="color:#dc2626;font-size:13px;">${esc(data.error || 'Search failed.')}</p>`;
-            setTopbarVerdict('bad', `<i class="fas fa-circle-exclamation"></i> ${esc(data.error || 'Search failed.')}`);
             return;
         }
 
@@ -1204,26 +955,9 @@ async function checkDoubleInsurance() {
         }
 
         box.innerHTML = `<p style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">DMVIC (Live)</p>${dmvicHtml}${localHtml}`;
-
-        // Verdict, worst news first: a live DMVIC certificate beats a local
-        // match, and an unreachable DMVIC is reported as unknown rather than
-        // as a green light.
-        if (dmvic.checked && dmvic.matches.length > 0) {
-            setTopbarVerdict('bad', '<i class="fas fa-triangle-exclamation"></i> DMVIC shows an existing certificate — double insurance risk.');
-        } else if (data.has_active_match) {
-            setTopbarVerdict('bad', '<i class="fas fa-triangle-exclamation"></i> An ACTIVE policy already exists in our records.');
-        } else if (!dmvic.checked) {
-            setTopbarVerdict('warn', '<i class="fas fa-circle-question"></i> DMVIC unreachable — no active policy in our records.');
-        } else {
-            setTopbarVerdict('ok', '<i class="fas fa-circle-check"></i> No active cover found — clear to quote.');
-        }
     } catch (err) {
         console.error('Double insurance check failed:', err);
         box.innerHTML = '<p style="color:#dc2626;font-size:13px;">Server communication error. Please try again.</p>';
-        setTopbarVerdict('bad', '<i class="fas fa-circle-exclamation"></i> Server communication error.');
-    } finally {
-        doubleCheckInFlight = false;
-        if (btn) btn.disabled = false;
     }
 }
 

@@ -5,10 +5,7 @@
  * Dynamic /api/* responses are NEVER cached — only same-origin static assets
  * and third-party CDN/font payloads used to render the shell.
  */
-/* Bump this on every release of a shell asset: /css/dashboard.css is served
- * stale-while-revalidate, so without a new cache name the first load after a
- * deploy paints the OLD stylesheet and the change looks broken. */
-const CACHE = 'westlake-shell-v2';
+const CACHE = 'westlake-shell-v1';
 
 const SHELL = [
   '/',
