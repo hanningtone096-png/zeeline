@@ -4386,8 +4386,8 @@ def policy_dmvic_status(policy_no):
     screen. DMVIC issuance starts only after payment settlement, then runs on
     a background worker so the agent isn't blocked waiting on its response — the
     frontend polls this every few seconds until dmvic_status settles into
-    'issued' / 'failed' / 'pending_manual' / 'pending_confirmation' /
-    'unsupported'."""
+    'issued' / 'failed' / 'pending_manual' / 'unsupported'. ('pending' and
+    'queued' are the in-flight states; nothing writes 'pending_confirmation'.)"""
     row = query("""SELECT policy_no, agent_id, status, dmvic_status, dmvic_certificate_no,
                           dmvic_transaction_no, dmvic_issuance_request_id, dmvic_error
                    FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
@@ -5104,12 +5104,20 @@ def audit_log():
 @login_required
 @admin_required
 def list_pending_dmvic_confirmations():
-    """Admin review queue for DMVIC policy alerts held with an issuance ID."""
+    """Admin review queue for DMVIC policy alerts held for manual action.
+
+    Filtered on 'pending_manual' — the status every hold branch in
+    _issue_dmvic_certificate_impl and the record-policy-alert route actually
+    write, and the one /api/dmvic/confirm-issuance requires. It previously
+    filtered on 'pending_confirmation', which no code path ever writes, so
+    this queue was permanently empty and held certificates were invisible to
+    admins.
+    """
     policies = query("""SELECT policy_no, quote_id, agent_id, vehicle_reg, total_payable,
                                dmvic_issuance_request_id, dmvic_error, created_at
                         FROM policies
                         WHERE dmvic_status=%s
-                        ORDER BY created_at DESC""", ('pending_confirmation',))
+                        ORDER BY created_at DESC""", ('pending_manual',))
     pending = []
     for policy in policies:
         quote = query("""SELECT policy_holder_name, chassis_number, company
@@ -5125,6 +5133,10 @@ def list_pending_dmvic_confirmations():
             "total_payable": policy.get('total_payable'),
             "dmvic_error": policy.get('dmvic_error'),
             "created_at": policy.get('created_at'),
+            # Only rows carrying DMVIC's IssuanceRequestID can be completed via
+            # /api/dmvic/confirm-issuance; the rest are data-correction holds
+            # (missing identity, unmapped product) that need a re-quote instead.
+            "can_confirm": bool(policy.get('dmvic_issuance_request_id')),
         })
     return jsonify({"pending": pending})
 

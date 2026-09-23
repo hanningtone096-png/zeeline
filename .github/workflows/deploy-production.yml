@@ -1,8 +1,11 @@
 name: Deploy production
 
+# MANUAL ONLY. This used to also run on `push: branches: [main]`, which shipped
+# every commit straight to the VPS and then Vercel with nothing but a syntax
+# check on backend/app.py as a gate (payments.py and mongo_store.py were never
+# checked). Run it deliberately from the Actions tab ("Run workflow") or:
+#   gh workflow run "Deploy production"
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

@@ -76,6 +76,25 @@ DATE_FIELDS = {
     "expires_at",
 }
 
+# DMVIC issuance states in which a certificate request has already been made
+# (or deliberately never will be), so nothing may ask DMVIC for a second one.
+#
+# buy_cover() writes 'awaiting_payment' at policy creation; that is the ONLY
+# state that still needs a request.  'pending' is set immediately before each
+# DMVIC call (app.py _issue_dmvic_certificate_impl) and therefore means a
+# request is in flight — it must never be re-enqueued or overwritten, because
+# a duplicate request comes back as a duplicate/ER005 alert and would bury a
+# certificate DMVIC already issued.
+DMVIC_CLAIMED_STATUSES = (
+    "pending",
+    "queued",
+    "pending_manual",
+    "pending_confirmation",
+    "issued",
+    "failed",
+    "unsupported",
+)
+
 
 def _clean_sql(sql):
     return re.sub(r"\s+", " ", sql.strip()).strip()
@@ -322,19 +341,20 @@ class MongoStore:
         certificate issuance.
 
         TEMP(payment-bypass): while the payment gate is lifted, buy_cover
-        enqueues issuance at policy-creation time, so a settled
-        dmvic_status may already exist when payment lands. Activation then
-        only flips the status and must NOT clobber the DMVIC result back to
-        'queued' (that would lose the outcome and requeue a duplicate
-        certificate request). Remove the second find_one_and_update branch
+        enqueues issuance at policy-creation time, so issuance has often
+        already started or finished by the time payment lands.  Activation
+        must then only flip the status — rewriting dmvic_status back to
+        'queued' would both lose the outcome and requeue a duplicate
+        certificate request.  Remove the second find_one_and_update branch
         when the payment gate is restored.
         """
         self._ensure_ready()
-        settled = {'issued', 'failed', 'pending_manual',
-                   'pending_confirmation', 'unsupported'}
+        claimed = sorted(DMVIC_CLAIMED_STATUSES)
+        # No request has been made yet ('awaiting_payment' from policy
+        # creation, or no status at all): claim it with 'queued'.
         previous = self.db.policies.find_one_and_update(
             {"policy_no": policy_no, "status": "pending_payment",
-             "dmvic_status": {"$nin": sorted(settled)}},
+             "dmvic_status": {"$nin": claimed}},
             {
                 "$set": {
                     "status": "active",
@@ -348,9 +368,12 @@ class MongoStore:
         if previous is not None:
             return _serialize(previous)
 
+        # A request is in flight or already settled: activate WITHOUT touching
+        # dmvic_status.  Clobbering an in-flight 'pending' here is what let the
+        # post-payment path fire a second issuance for the same certificate.
         previous = self.db.policies.find_one_and_update(
             {"policy_no": policy_no, "status": "pending_payment",
-             "dmvic_status": {"$in": sorted(settled)}},
+             "dmvic_status": {"$in": claimed}},
             {"$set": {"status": "active", "updated_at": _now()}},
             return_document=ReturnDocument.BEFORE,
         )

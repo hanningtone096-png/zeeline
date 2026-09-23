@@ -1733,8 +1733,8 @@ function pollDmvicStatus(policyNo) {
         if (attempts >= maxAttempts) {
             clearInterval(poll);
             box.className = 'dmvic-status-box manual';
-            box.innerHTML = `<i class="fas fa-clock"></i> Still processing — check
-                <a href="/renewals" style="color:#1d4ed8;">Renewals</a> shortly for the final certificate status.`;
+            box.innerHTML = `<i class="fas fa-clock"></i> Still processing — check the
+                <a href="/dashboard" style="color:#1d4ed8;">DMVIC alerts panel</a> shortly for the final certificate status.`;
         }
     }, 3000);
 }

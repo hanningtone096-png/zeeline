@@ -27,6 +27,10 @@ from flask import Blueprint, request, jsonify, session, abort
 # premium_calc is a pure module (stdlib only), so importing it here does not
 # create the app.py <-> payments.py cycle this module otherwise avoids.
 from premium_calc import COMING_SOON_INSURERS
+# mongo_store is a plain module (it does not import payments or app), so this
+# constant can be shared rather than re-listed here and drifting out of sync
+# with the copy activate_policy_after_payment() matches on.
+from mongo_store import DMVIC_CLAIMED_STATUSES
 
 log = logging.getLogger(__name__)
 
@@ -251,9 +255,13 @@ def activate_paid_policy_and_enqueue_dmvic(policy_no, *, source, reference, user
     # enqueues DMVIC issuance the moment the policy is created, so by the
     # time payment settles the certificate has often already been issued.
     # Re-enqueueing here would ask DMVIC for a duplicate certificate.
-    settled = {'issued', 'failed', 'pending_manual', 'pending_confirmation', 'unsupported'}
-    if (policy.get('dmvic_status') or '') in settled:
-        log.info("Skipping post-payment DMVIC enqueue for %s (dmvic_status=%s already settled)",
+    #
+    # This must also cover the IN-FLIGHT states ('pending', 'queued'), not
+    # just the settled ones.  A settlement that lands mid-issuance used to
+    # fall through and enqueue a second request, whose duplicate/ER005 alert
+    # then overwrote the certificate DMVIC had just issued.
+    if (policy.get('dmvic_status') or '') in DMVIC_CLAIMED_STATUSES:
+        log.info("Skipping post-payment DMVIC enqueue for %s (dmvic_status=%s already claimed)",
                  policy_no, policy.get('dmvic_status'))
         return True
 
