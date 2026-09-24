@@ -133,8 +133,6 @@ ARCHPAY_WEBHOOK_URL     = os.environ.get('ARCHPAY_WEBHOOK_URL', '').strip()
 MPESA_ENV = ARCHPAY_MODE
 MPESA_CALLBACK_SECRET = ARCHPAY_CALLBACK_SECRET
 
-MAX_UNDERPAYMENT_ALLOWED = 800
-
 
 def mpesa_format_phone(phone):
     phone = str(phone).strip().replace(' ', '').replace('-', '').replace('+', '')
@@ -445,10 +443,13 @@ def mpesa_stk():
     d         = request.get_json() or {}
     policy_no = d.get('policy_no', '').strip()
     phone     = d.get('phone', '').strip()
-    amount    = d.get('amount', 0)
+    # The quoted premium is not editable: the charge is always the outstanding
+    # balance computed below. A client-supplied amount is only checked so a
+    # stale/tampered request that tries to pay less is rejected outright.
+    requested_amount = d.get('amount')
 
-    if not policy_no or not phone or not amount:
-        return jsonify({"error": "policy_no, phone and amount are required"}), 400
+    if not policy_no or not phone:
+        return jsonify({"error": "policy_no and phone are required"}), 400
 
     policy = _query("SELECT * FROM policies WHERE policy_no=%s", (policy_no,), fetchone=True)
     if not policy:
@@ -456,13 +457,11 @@ def mpesa_stk():
     if session['role'] != 'admin' and policy['agent_id'] != session['user_id']:
         return jsonify({"error": "You do not have access to this policy"}), 403
 
-    try:
-        amount = float(amount)
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid amount"}), 400
-
-    if amount <= 0:
-        return jsonify({"error": "Amount must be greater than zero"}), 400
+    if requested_amount is not None and requested_amount != '':
+        try:
+            requested_amount = float(requested_amount)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid amount"}), 400
 
     quoted_amount = float(policy['total_payable'])
     paid_row = _query("""
@@ -475,13 +474,16 @@ def mpesa_stk():
     if balance <= 0:
         return jsonify({"error": "This policy has already been paid in full."}), 400
 
-    if amount < balance:
+    # Charge the full outstanding balance, whatever the client claims.
+    amount = balance
+
+    if requested_amount is not None and requested_amount < balance:
         agent = {
             'name':  session.get('name', session.get('username')),
             'email': session.get('email', ''),
         }
-        shortfall = balance - amount
-        flag_reason = (f"Paid KES {amount:,.0f} against policy {policy_no}, "
+        shortfall = balance - requested_amount
+        flag_reason = (f"Tried to pay KES {requested_amount:,.0f} against policy {policy_no}, "
                        f"KES {shortfall:,.0f} below the outstanding balance of KES {balance:,.0f} "
                        f"(on {time.strftime('%Y-%m-%d %H:%M')}).")
 
@@ -496,11 +498,14 @@ def mpesa_stk():
                       "migrations_add_underpayment_flag.sql been run?): %s", type(e).__name__)
 
         _enqueue("underpayment_alert", _notify_underpayment_attempt,
-                 agent, policy_no, balance, amount, phone)
+                 agent, policy_no, balance, requested_amount, phone)
 
         _query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
                (session['user_id'], 'underpayment_warning',
-                f"policy={policy_no} balance={balance} attempted={amount}"), commit=True)
+                f"policy={policy_no} balance={balance} attempted={requested_amount}"), commit=True)
+
+        return jsonify({"error": "The premium is locked to the quoted amount — "
+                                 "partial payments are not accepted."}), 400
 
     result = mpesa_stk_push(phone=phone, amount=amount,
                              account_ref=policy_no, description='Insurance Premium')

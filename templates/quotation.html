@@ -1621,19 +1621,20 @@ async function buyCover(quoteId) {
                 </div>
 
                 <p style="font-size:13px; color:#475569; margin:14px 0 10px;">Pay the premium via M-Pesa:</p>
-                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
                     <input id="mpesa_phone" placeholder="07XXXXXXXX" value="${esc(policyPhone)}"
                         style="padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; width:165px; box-sizing:border-box;">
-                    <input id="mpesa_amount" type="number" min="1" placeholder="Amount" value="${r.total_payable || 0}"
-                        style="padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; width:130px; box-sizing:border-box;">
-                    <button onclick="initiateMpesa('${esc(r.policy_no)}')" id="mpesaBtn" data-amount="${r.total_payable || 0}"
+                    <span style="padding:9px 12px; border:1px solid #bbf7d0; background:#f0fdf4; border-radius:6px; font-size:14px; font-weight:700; color:#15803d; box-sizing:border-box;">
+                        KES ${Number(r.total_payable || 0).toLocaleString()}
+                    </span>
+                    <button onclick="initiateMpesa('${esc(r.policy_no)}')" id="mpesaBtn"
                         style="background:linear-gradient(135deg,#16a34a,#15803d); color:#fff; border:none;
                                padding:9px 16px; border-radius:6px; font-weight:700; cursor:pointer;
                                font-size:14px; display:flex; align-items:center; gap:6px;">
                         <i class="fas fa-mobile-alt"></i> Pay via M-Pesa
                     </button>
                 </div>
-                <small style="color:#94a3b8;">Defaults to the quoted total — edit if collecting a different amount (e.g. deposit/instalment).</small>
+                <small style="color:#94a3b8;">The premium is fixed to the quoted amount — partial payments are not accepted.</small>
                 <div id="mpesaMsg" style="font-size:13px; margin-top:8px;"></div>
                 <a href="/renewals" style="font-size:13px; color:#2563eb; text-decoration:none;">
                     <i class="fas fa-sync"></i> View in Renewals
@@ -1817,14 +1818,10 @@ async function submitQuotationDmvicConfirmation(isApproved) {
     }
 }
 
-async function initiateMpesa(policyNo, amount) {
+async function initiateMpesa(policyNo) {
     const phone  = document.getElementById('mpesa_phone')?.value?.trim();
     const btn    = document.getElementById('mpesaBtn');
     const msgEl  = document.getElementById('mpesaMsg');
-
-    const finalAmount = parseFloat(amount) || parseFloat(document.getElementById('mpesa_amount')?.value) || parseFloat(btn?.dataset?.amount) || 0;
-    if (!finalAmount) { msgEl.style.color='#dc2626'; msgEl.innerText='Could not determine premium amount.'; return; }
-    amount = finalAmount;
 
     if (!phone) { msgEl.style.color='#dc2626'; msgEl.innerText='Please enter a phone number.'; return; }
 
@@ -1836,7 +1833,7 @@ async function initiateMpesa(policyNo, amount) {
         const res  = await fetch('/api/mpesa/stk', {
             method:  'POST',
             headers: withCsrf({ 'Content-Type': 'application/json' }),
-            body:    JSON.stringify({ policy_no: policyNo, phone, amount })
+            body:    JSON.stringify({ policy_no: policyNo, phone })
         });
         const d = await res.json();
 
