@@ -1660,10 +1660,28 @@ function pollDmvicStatus(policyNo) {
     const render = (statusData) => {
         const status = statusData.dmvic_status;
 
-        // TEMP(payment-bypass): issuance now runs before payment settles, so
-        // key off dmvic_status alone — policy_status stays 'pending_payment'
-        // even once the certificate has been issued or has failed.
-        if (status === 'awaiting_payment' || status === 'queued' || status === 'pending') {
+        // Pay-before-issuance gate: a policy stays 'pending_payment' until the
+        // cumulative payments cover the quoted premium, and nothing is issued
+        // before that. Surface the shortfall when a part payment has settled —
+        // the M-Pesa button below always charges the outstanding balance.
+        if (statusData.policy_status === 'pending_payment') {
+            const paid = Number(statusData.amount_paid || 0);
+            const bal  = Number(statusData.balance || 0);
+            box.className = 'dmvic-status-box pending';
+            if (paid > 0 && bal > 0) {
+                box.innerHTML = `<i class="fas fa-clock"></i> Part payment received —
+                    KES ${paid.toLocaleString()} of KES ${Number(statusData.amount_due || 0).toLocaleString()}.
+                    <strong>KES ${bal.toLocaleString()} still owed</strong> before the DMVIC
+                    certificate can be issued.`;
+                const payBtn = document.getElementById('mpesaBtn');
+                if (payBtn) { payBtn.style.display = ''; payBtn.innerHTML = '<i class="fas fa-mobile-alt"></i> Pay Balance'; }
+            } else {
+                box.innerHTML = `<i class="fas fa-clock"></i> Awaiting confirmed payment. DMVIC certificate issuance starts automatically after payment.`;
+            }
+            return false; // keep polling until the policy is fully paid
+        }
+
+        if (status === 'queued' || status === 'pending') {
             box.className = 'dmvic-status-box pending';
             box.innerHTML = `<i class="fas fa-clock"></i> DMVIC certificate issuance in progress…`;
             return false; // keep polling until a terminal status lands
@@ -1865,10 +1883,32 @@ async function initiateMpesa(policyNo) {
 
                 if (qd.success) {
                     clearInterval(poll);
-                    msgEl.style.color = '#15803d';
-                    msgEl.innerHTML   = `<strong><i class="fas fa-check-circle"></i> Payment Confirmed!</strong><br>
-                        <span style="font-size:12px; color:#64748b;">Policy is now active. Preparing the DMVIC certificate…</span>`;
-                    btn.style.display = 'none';
+                    // The payment settled, but the policy only activates once
+                    // cumulative payments cover the quoted premium — check the
+                    // balance before claiming success.
+                    let fullyPaid = true, balance = 0, paid = 0;
+                    try {
+                        const sres = await fetch(`/api/policies/${encodeURIComponent(policyNo)}/status`);
+                        if (sres.ok) {
+                            const s = await sres.json();
+                            fullyPaid = !!s.fully_paid;
+                            balance   = Number(s.balance || 0);
+                            paid      = Number(s.amount_paid || 0);
+                        }
+                    } catch { /* fall back to the full-payment message */ }
+
+                    if (fullyPaid) {
+                        msgEl.style.color = '#15803d';
+                        msgEl.innerHTML   = `<strong><i class="fas fa-check-circle"></i> Payment Confirmed!</strong><br>
+                            <span style="font-size:12px; color:#64748b;">Policy is now active. Preparing the DMVIC certificate…</span>`;
+                        btn.style.display = 'none';
+                    } else {
+                        msgEl.style.color = '#d97706';
+                        msgEl.innerHTML   = `<strong><i class="fas fa-circle-half-stroke"></i> Part payment received — KES ${paid.toLocaleString()}.</strong><br>
+                            <span style="font-size:12px; color:#64748b;">KES ${balance.toLocaleString()} still owed. The DMVIC certificate is issued only once the premium is settled in full.</span>`;
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-mobile-alt"></i> Pay Balance';
+                    }
                     pollDmvicStatus(policyNo);
                 } else if (qd.result_code && qd.result_code !== '0' && attempts >= 2) {
                     clearInterval(poll);

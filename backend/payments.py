@@ -249,15 +249,15 @@ def activate_paid_policy_and_enqueue_dmvic(policy_no, *, source, reference, user
     if not policy:
         return False
 
-    # TEMP(payment-bypass): while the payment gate is lifted, buy_cover
-    # enqueues DMVIC issuance the moment the policy is created, so by the
-    # time payment settles the certificate has often already been issued.
-    # Re-enqueueing here would ask DMVIC for a duplicate certificate.
-    #
-    # This must also cover the IN-FLIGHT states ('pending', 'queued'), not
-    # just the settled ones.  A settlement that lands mid-issuance used to
-    # fall through and enqueue a second request, whose duplicate/ER005 alert
-    # then overwrote the certificate DMVIC had just issued.
+    # Duplicate-issuance guard. With the pay-before-issuance gate restored,
+    # issuance is normally claimed for the first time right here — but
+    # policies created while the TEMP(payment-bypass) gate was lifted may
+    # already carry an in-flight or settled dmvic_status when their payment
+    # finally settles, and a settlement can also race a queued worker. This
+    # must cover the IN-FLIGHT states ('pending', 'queued'), not just the
+    # settled ones: a settlement that lands mid-issuance used to fall through
+    # and enqueue a second request, whose duplicate/ER005 alert then
+    # overwrote the certificate DMVIC had just issued.
     if (policy.get('dmvic_status') or '') in DMVIC_CLAIMED_STATUSES:
         log.info("Skipping post-payment DMVIC enqueue for %s (dmvic_status=%s already claimed)",
                  policy_no, policy.get('dmvic_status'))
@@ -417,13 +417,10 @@ def buy_cover():
         VALUES (%s, %s, 'pending', 'manual')
     """, (policy_no, q['total_payable']), commit=True)
 
-    # TEMP(payment-bypass): issue the DMVIC certificate immediately instead of
-    # waiting for payment to settle. Revert this block (and the matching TEMP
-    # blocks in activate_paid_policy_and_enqueue_dmvic, mongo_store
-    # .activate_policy_after_payment and _issue_dmvic_certificate_impl) once
-    # the ER002 issue is resolved.
-    _enqueue("dmvic_issue_certificate", _issue_dmvic_certificate, policy_no, q)
-
+    # DMVIC issuance is intentionally NOT enqueued here: a certificate may only
+    # be requested once the policy is fully paid. activate_paid_policy_
+    # and_enqueue_dmvic() does it after _settle_mpesa_payment() confirms the
+    # cumulative payments cover the quoted premium.
     _cache_delete_prefix("cache:dashboard")
     _cache_delete_prefix("cache:reports_summary")
 

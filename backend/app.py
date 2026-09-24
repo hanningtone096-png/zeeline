@@ -1469,10 +1469,11 @@ def _issue_dmvic_certificate_impl(policy_no, quote_row):
     unknown-column error until that migration is applied.
     """
     policy = query("SELECT status FROM policies WHERE policy_no=%s", (policy_no,), fetchone=True)
-    # TEMP(payment-bypass): 'pending_payment' is also accepted while the
-    # pay-before-issuance gate is lifted (see TEMP blocks in payments.py) —
-    # restore to `!= 'active'` when the payment gate goes back on.
-    if not policy or policy.get('status') not in ('active', 'pending_payment'):
+    # Pay-before-issuance gate: only fully paid (activated) policies reach
+    # DMVIC. Issuance jobs are enqueued exclusively from
+    # activate_paid_policy_and_enqueue_dmvic(), after the cumulative payments
+    # cover the quoted premium.
+    if not policy or policy.get('status') != 'active':
         log.warning("DMVIC issuance skipped for unpaid or missing policy %s", policy_no)
         return
 
@@ -4388,7 +4389,7 @@ def policy_dmvic_status(policy_no):
     frontend polls this every few seconds until dmvic_status settles into
     'issued' / 'failed' / 'pending_manual' / 'unsupported'. ('pending' and
     'queued' are the in-flight states; nothing writes 'pending_confirmation'.)"""
-    row = query("""SELECT policy_no, agent_id, status, dmvic_status, dmvic_certificate_no,
+    row = query("""SELECT policy_no, agent_id, status, total_payable, dmvic_status, dmvic_certificate_no,
                           dmvic_transaction_no, dmvic_issuance_request_id, dmvic_error
                    FROM policies WHERE policy_no=%s""", (policy_no,), fetchone=True)
     if not row:
@@ -4400,9 +4401,25 @@ def policy_dmvic_status(policy_no):
         os.path.join(CERTIFICATES_FOLDER, f"Certificate_{policy_no}.pdf")
     )
 
+    # Payment position: the amount due is the quoted premium for this
+    # policy/period (each instalment stage is its own policy with the
+    # per-stage premium as total_payable), and paid counts every settled
+    # payment cumulatively. balance > 0 keeps the policy short of activation.
+    amount_due = round(float(row.get('total_payable') or 0), 2)
+    paid_row = query("""SELECT COALESCE(SUM(amount),0) AS paid
+                        FROM payments
+                        WHERE policy_no=%s AND status='completed'""",
+                     (policy_no,), fetchone=True) or {}
+    amount_paid = round(float(paid_row.get('paid', 0) or 0), 2)
+    balance = round(max(0.0, amount_due - amount_paid), 2)
+
     return jsonify({
         "policy_no":       row.get('policy_no'),
         "policy_status":   row.get('status'),
+        "amount_due":      amount_due,
+        "amount_paid":     amount_paid,
+        "balance":         balance,
+        "fully_paid":      amount_due > 0 and amount_paid >= amount_due,
         "dmvic_status":    row.get('dmvic_status'),
         "certificate_no":  row.get('dmvic_certificate_no'),
         "transaction_no":  row.get('dmvic_transaction_no'),

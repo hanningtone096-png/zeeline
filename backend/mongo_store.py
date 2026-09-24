@@ -340,13 +340,13 @@ class MongoStore:
         caller receives the pre-transition policy document and may enqueue
         certificate issuance.
 
-        TEMP(payment-bypass): while the payment gate is lifted, buy_cover
-        enqueues issuance at policy-creation time, so issuance has often
-        already started or finished by the time payment lands.  Activation
-        must then only flip the status — rewriting dmvic_status back to
-        'queued' would both lose the outcome and requeue a duplicate
-        certificate request.  Remove the second find_one_and_update branch
-        when the payment gate is restored.
+        The second update branch keeps that idempotency guarantee intact for
+        policies whose dmvic_status was already claimed — policies created
+        while the TEMP(payment-bypass) gate was lifted (issuance started at
+        buy_cover time), and settlements racing an in-flight worker.  For
+        those, activation must only flip the status: rewriting dmvic_status
+        back to 'queued' would both lose the outcome and requeue a duplicate
+        certificate request.
         """
         self._ensure_ready()
         claimed = sorted(DMVIC_CLAIMED_STATUSES)
