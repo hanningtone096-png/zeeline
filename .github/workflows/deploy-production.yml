@@ -1,11 +1,10 @@
 name: Deploy production
 
-# MANUAL ONLY. This used to also run on `push: branches: [main]`, which shipped
-# every commit straight to the VPS and then Vercel with nothing but a syntax
-# check on backend/app.py as a gate (payments.py and mongo_store.py were never
-# checked). Run it deliberately from the Actions tab ("Run workflow") or:
-#   gh workflow run "Deploy production"
+# Deploy the tested main branch automatically. Manual dispatch remains available
+# for an intentional re-deploy of the current production revision.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,8 +21,8 @@ jobs:
       - name: Check out the release commit
         uses: actions/checkout@v4
 
-      - name: Validate Python syntax
-        run: python3 -c "compile(open('backend/app.py', encoding='utf-8').read(), 'backend/app.py', 'exec')"
+      - name: Validate backend Python syntax
+        run: python3 -m compileall -q backend
 
   deploy-backend:
     needs: validate
