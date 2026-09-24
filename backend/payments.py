@@ -304,7 +304,8 @@ def _policy_fully_paid(policy_no):
     return paid >= quoted
 
 
-def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None):
+def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None,
+                          verified_amount=None):
     """Mark the M-Pesa payment for `ref` completed, then activate the policy
     only once it is fully paid.
 
@@ -312,7 +313,35 @@ def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None):
     Partial payments accumulate (each as its own completed `payments` row) and
     the policy is activated only when the quoted premium is covered. Returns
     True if the policy transitioned to active on this call, False otherwise.
+
+    `verified_amount` is the amount ArchPay's authenticated verify endpoint
+    reported for this checkout request. When both it and the server-pushed
+    amount are known they must match exactly — the payment stays pending and
+    the mismatch is audited otherwise, so a settlement that does not line up
+    with the STK push can never activate a policy or count toward the premium.
     """
+    # Amount-match gate: the only valid amount is the one the server pushed
+    # for this checkout request (the outstanding balance at push time). A
+    # reported amount that differs means the settlement does not correspond
+    # to this payment — leave the row pending so it is not counted.
+    pushed_row = _query("SELECT amount FROM payments WHERE reference=%s",
+                        (ref,), fetchone=True) or {}
+    pushed_amount = pushed_row.get('amount')
+    if verified_amount is not None and pushed_amount is not None:
+        try:
+            matches = round(float(pushed_amount), 2) == round(float(verified_amount), 2)
+        except (TypeError, ValueError):
+            matches = False
+        if not matches:
+            log.warning("Payment %s for %s: reported amount %s does not match the "
+                        "pushed KES %s — left pending.",
+                        ref, policy_no, verified_amount, pushed_amount)
+            _query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
+                   ('mpesa_amount_mismatch',
+                    f"policy={policy_no} ref={ref} pushed={pushed_amount} "
+                    f"reported={verified_amount}"), commit=True)
+            return False
+
     # `reference` (the ArchPay checkout request id) is unique per STK push, so
     # this touches exactly one row. Policy activation below is itself idempotent
     # (activate_policy_after_payment only transitions pending_payment->active
@@ -563,6 +592,7 @@ def mpesa_query():
             source='mpesa_payment_confirmed',
             reference=receipt,
             user_id=session.get('user_id'),
+            verified_amount=result.get('amount'),
         )
     return jsonify(result)
 
@@ -605,6 +635,7 @@ def mpesa_callback(secret):
                 ref, pmt['policy_no'],
                 source='archpay_callback_confirmed',
                 reference=receipt,
+                verified_amount=verify.get('amount'),
             )
         elif status in ('failed', 'cancelled', 'canceled', 'timeout', 'reversed'):
             _query("UPDATE payments SET status=%s WHERE reference=%s AND status='pending'",
