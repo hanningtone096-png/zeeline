@@ -311,12 +311,22 @@ NUM_WORKERS = int(os.environ.get('BACKGROUND_WORKERS', 2))
 
 def _background_worker(worker_id):
     while True:
-        job_name, fn, args, kwargs = task_queue.get()
+        job_name, fn, args, kwargs, enqueued_at = task_queue.get()
+        started = time.time()
+        # Slow-issuance diagnosis: 'dmvic_issue_certificate' jobs should start
+        # within a second of settlement. A large wait means both workers were
+        # busy with other jobs (PDF/email/OTP) and the queue was backing up.
         try:
+            if time.time() - enqueued_at > 2:
+                log.warning("[worker-%s] job '%s' waited %.1fs in the queue before starting",
+                            worker_id, job_name, time.time() - enqueued_at)
             log.info("[worker-%s] running background job: %s", worker_id, job_name)
             fn(*args, **kwargs)
+            log.info("[worker-%s] job '%s' finished in %.1fs",
+                     worker_id, job_name, time.time() - started)
         except Exception as e:
-            log.error("[worker-%s] background job '%s' failed: %s", worker_id, job_name, e)
+            log.error("[worker-%s] background job '%s' failed after %.1fs: %s",
+                      worker_id, job_name, time.time() - started, e)
         finally:
             task_queue.task_done()
 
@@ -326,7 +336,7 @@ for i in range(NUM_WORKERS):
 
 
 def enqueue(job_name, fn, *args, **kwargs):
-    task_queue.put((job_name, fn, args, kwargs))
+    task_queue.put((job_name, fn, args, kwargs, time.time()))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,7 +452,10 @@ def send_email(to, subject, html_body, attachments=None):
                                 f'attachment; filename="{fname}"')
                 msg.attach(part)
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+        # Bound every blocking SMTP operation (connect/read/write). Without a
+        # timeout a wedged mail server pins this thread — and on a background
+        # worker that delays every job queued behind it, DMVIC issuance included.
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
             s.starttls()
             s.login(SMTP_EMAIL, SMTP_PASSWORD)
             s.send_message(msg)
@@ -611,6 +624,28 @@ def dmvic_cert_tuple():
     log.warning("DMVIC mTLS cert or key missing at: %s / %s", cert_path, key_path)
     return None
 
+def _dmvic_timed_post(label, url, *, timeout, **kwargs):
+    """requests.post wrapper that logs how long DMVIC took to answer.
+
+    Slow-issuance diagnosis: a healthy issuance call returns inside its
+    timeout; anything over ~10s here is DMVIC's server, not this pipeline.
+    Logs on both the happy path and the failure path (callers catch the
+    exception themselves)."""
+    started = time.time()
+    try:
+        res = requests.post(url, timeout=timeout, **kwargs)
+    except Exception:
+        log.error("DMVIC %s failed after %.1fs", label, time.time() - started)
+        raise
+    elapsed = time.time() - started
+    if elapsed > 10:
+        log.warning("DMVIC %s took %.1fs to answer (HTTP %s) — slower than expected",
+                    label, elapsed, res.status_code)
+    else:
+        log.info("DMVIC %s took %.1fs (HTTP %s)", label, elapsed, res.status_code)
+    return res
+
+
 # Confirmed against DMVIC's Intermediary Issuance API doc (section 4.12.1.1.1).
 # NOTE: DMVIC support confirmed (2026-07-11) that intermediaries are ONLY
 # permitted to issue Type A certificates for these two vehicle categories —
@@ -717,7 +752,8 @@ def dmvic_get_token(force_refresh=False):
             return cached
 
         try:
-            res = requests.post(
+            res = _dmvic_timed_post(
+                "token login",
                 f"{DMVIC_BASE_URL}/api/v1/Account/Login",
                 json={
                     "Username": DMVIC_API_USERNAME,
@@ -816,7 +852,8 @@ def dmvic_validate_double_insurance(token, *, policy_start_date, policy_end_date
         payload["chassisnumber"] = chassis_number
 
     try:
-        res = requests.post(
+        res = _dmvic_timed_post(
+            "double-insurance check",
             f"{DMVIC_BASE_URL}/api/v6/Integration/ValidateDoubleInsurance",
             json=payload,
             headers={
@@ -867,7 +904,8 @@ def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approve
         "Usernames": usernames or "",
     }
     try:
-        res = requests.post(
+        res = _dmvic_timed_post(
+            "confirm-issuance",
             f"{DMVIC_BASE_URL}/api/v6/Integration/ConfirmCertificateIssuance",
             json=payload,
             headers={
@@ -953,7 +991,8 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
         payload["cubicCapacity"] = cubic_capacity
 
     try:
-        res = requests.post(
+        res = _dmvic_timed_post(
+            "Type A issuance",
             f"{DMVIC_BASE_URL}/api/v7/IntermediaryIntegration/IssuanceTypeACertificate",
             json=payload,
             headers={
@@ -1055,7 +1094,8 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
         payload["cubicCapacity"] = cubic_capacity
 
     try:
-        res = requests.post(
+        res = _dmvic_timed_post(
+            "Type B issuance",
             f"{DMVIC_BASE_URL}/api/v7/IntermediaryIntegration/IssuanceTypeBCertificate",
             json=payload,
             headers={
@@ -1148,7 +1188,8 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
         payload["cubicCapacity"] = cubic_capacity
 
     try:
-        res = requests.post(
+        res = _dmvic_timed_post(
+            "Type C issuance",
             f"{DMVIC_BASE_URL}/api/v7/IntermediaryIntegration/IssuanceTypeCCertificate",
             json=payload,
             headers={
@@ -1261,7 +1302,8 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
         payload["cubicCapacity"] = cubic_capacity
 
     try:
-        res = requests.post(
+        res = _dmvic_timed_post(
+            "Type D issuance",
             f"{DMVIC_BASE_URL}/api/v7/IntermediaryIntegration/IssuanceTypeDCertificate",
             json=payload,
             headers={
@@ -1884,8 +1926,13 @@ def issue_dmvic_certificate(policy_no, quote_row):
     the notification fires even when the impl raises before reaching a
     terminal UPDATE (in which case dmvic_status stays unset and the notifier
     quietly does nothing)."""
+    started = time.time()
     try:
         _issue_dmvic_certificate_impl(policy_no, quote_row)
+        log.info("DMVIC issuance job for %s completed in %.1fs (dmvic_status=%s)",
+                 policy_no, time.time() - started,
+                 (query("SELECT dmvic_status FROM policies WHERE policy_no=%s",
+                        (policy_no,), fetchone=True) or {}).get('dmvic_status'))
     finally:
         _notify_dmvic_outcome(policy_no)
 

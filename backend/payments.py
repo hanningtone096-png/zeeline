@@ -265,6 +265,7 @@ def activate_paid_policy_and_enqueue_dmvic(policy_no, *, source, reference, user
 
     quote = _query("SELECT * FROM quotations WHERE id=%s", (policy.get('quote_id'),), fetchone=True)
     if quote:
+        log.info("Payment settled for %s — enqueuing DMVIC issuance now", policy_no)
         _enqueue("dmvic_issue_certificate", _issue_dmvic_certificate, policy_no, quote)
     else:
         log.error("Payment settled for %s but quotation %s was not found", policy_no, policy.get('quote_id'))
