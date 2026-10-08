@@ -524,7 +524,7 @@ function withCsrf(headers = {}) {
 const data = {
     company:null, type_of_cover:'', type_of_certificate:'',
     product:null, sub_type:null, pax:0, business_type:'new', parent_policy_no:null, is_tor:false,
-    extension_company:null, selected_premium:null,
+    extension_company:null, extension_plan:null, selected_premium:null,
     commencing_date:'', expiry_date:'',
     policy_holder_name:'', email:'', phone:'', kra_pin:'', id_number:'', postal_address:'',
     vehicle_reg:'', chassis_number:'', vehicle_body_type:'',
@@ -749,6 +749,7 @@ document.querySelectorAll('[data-value][id^="bt"]').forEach(card => {
         data.business_type = card.dataset.value;
         data.parent_policy_no = null;
         data.extension_company = null;
+        data.extension_plan = null;
         if (data.business_type === 'new') {
             data.company = null;
             data.selected_premium = null;
@@ -797,6 +798,9 @@ async function refreshAvailablePeriods() {
             return response.ok ? response.json() : { periods: [] };
         }));
         const allowed = new Set(results.flatMap(result => Array.isArray(result.periods) ? result.periods : []));
+        if (data.business_type === 'extension' && data.extension_plan) {
+            allowed.add(data.extension_plan);   // legacy plan stays valid for extensions
+        }
         select.querySelectorAll('option').forEach(option => {
             if (!option.value) return;
             option.hidden = !allowed.has(option.value);
@@ -989,9 +993,10 @@ function comparisonPayload() {
         tonnage: Number(document.getElementById('tonnage').value || 0),
         pax: Number(document.getElementById('pax').value || 0),
         is_tor: !!data.is_tor,
+        business_type: data.business_type,
+        parent_policy_no: data.parent_policy_no,
     };
 }
-
 function comparisonReadiness(payload) {
     // TOR ignores the certificate entirely — it is priced as a flat figure.
     if (!payload.product || !payload.type_of_cover
@@ -1183,6 +1188,7 @@ async function lookupExtension() {
 
         const q = result.data;
         data.parent_policy_no = q.policy_no;
+        data.extension_plan = q.installment_plan || null;
         selectInsurerForExtension(q.company);
 
         // The prior policy's quotation stores the real per-insurer product

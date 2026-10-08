@@ -2151,6 +2151,25 @@ def api_available_periods():
     product = request.args.get('product', '')
     cover   = request.args.get('cover', '')
     return jsonify({"periods": available_periods(company, product, cover)})
+def legacy_extension_parent(parent_policy_no, company, cert):
+    """Return the parent policy only if this is a valid extension of an existing
+    installment policy on the SAME insurer with the SAME plan, even when that
+    plan is no longer sold for new business. Otherwise None."""
+    if not parent_policy_no or cert not in INSTALLMENT_COUNTS:
+        return None
+    parent = query("SELECT * FROM policies WHERE policy_no=%s",
+                   (parent_policy_no.strip().upper(),), fetchone=True)
+    if not parent:
+        return None
+    if session['role'] != 'admin' and parent.get('agent_id') != session['user_id']:
+        return None
+    if parent.get('installment_plan') != cert:
+        return None
+    pq = query("SELECT company FROM quotations WHERE id=%s",
+               (parent.get('quote_id'),), fetchone=True)
+    if not pq or (pq.get('company') or '').lower() != (company or '').lower():
+        return None
+    return parent
 
 
 @app.route('/api/quotations/premium-comparison', methods=['POST'])
@@ -2164,8 +2183,9 @@ def quotation_premium_comparison():
     cover = (d.get('type_of_cover') or '').strip()
     certificate = (d.get('type_of_certificate') or '').strip()
     # TOR is a flat, rates-only figure with no certificate period, so it is the
-    # one case where a certificate type is not required.
     is_tor = bool(d.get('is_tor'))
+    business_type = (d.get('business_type') or 'new').strip().lower()
+    parent_policy_no = (d.get('parent_policy_no') or '').strip().upper() or None
     if not product or not cover or not (certificate or is_tor):
         return jsonify({"error": "Product, cover type and certificate type are required."}), 400
     try:
@@ -2218,9 +2238,12 @@ def quotation_premium_comparison():
                                 "reason": "This insurer does not offer this product and cover."})
             continue
         if certificate not in available_periods(company, company_product, cover):
-            comparisons.append({"company": company, "available": False,
-                                "reason": "This certificate period is not offered for the selected product."})
-            continue
+            legacy_ok = (business_type == 'extension' and
+                         legacy_extension_parent(parent_policy_no, company, certificate) is not None)
+            if not legacy_ok:
+                comparisons.append({"company": company, "available": False,
+                                    "reason": "This certificate period is not offered for the selected product."})
+                continue
         try:
             calculation = calculate_premium(
                 cover, company_product, value, certificate, seats=seats, company=company,
@@ -4113,13 +4136,19 @@ def generate_quotation():
     # or an installment for an insurer that no longer sells them — falls through
     # the unguarded PERIOD_FACTORS lookup in _period_base(), is priced as annual,
     # and gets persisted.
-    if cert not in available_periods(company, product, cover):
-        return jsonify({"error": f"{cert.replace('_', ' ').title()} is not available for "
-                                 f"{(d.get('company') or '').title()} {product.replace('_', ' ')}."}), 400
+    legacy_extension = (
+        business_type == 'extension'
+        and legacy_extension_parent(parent_policy_no, company, cert) is not None
+    )
 
-    if cert in INSTALLMENT_COUNTS and cert not in allowed_installments(company, product):
-        return jsonify({"error": f"{cert.replace('_', ' ').title()} is not available for "
-                                  f"{(d.get('company') or '').title()} {product.replace('_', ' ')}."}), 400
+    if not legacy_extension:
+        if cert not in available_periods(company, product, cover):
+            return jsonify({"error": f"{cert.replace('_', ' ').title()} is not available for "
+                                     f"{(d.get('company') or '').title()} {product.replace('_', ' ')}."}), 400
+
+        if cert in INSTALLMENT_COUNTS and cert not in allowed_installments(company, product):
+            return jsonify({"error": f"{cert.replace('_', ' ').title()} is not available for "
+                                      f"{(d.get('company') or '').title()} {product.replace('_', ' ')}."}), 400
     if business_type == 'extension' and cert not in INSTALLMENT_COUNTS:
         return jsonify({"error": "Extensions are available only for an installment policy."}), 400
 
