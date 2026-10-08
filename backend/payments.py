@@ -454,11 +454,22 @@ def buy_cover():
     _cache_delete_prefix("cache:dashboard")
     _cache_delete_prefix("cache:reports_summary")
 
+    # TEMP: testing only. Remove when done.
+    bypass = (os.environ.get('BYPASS_PAYMENT_GATE', '') == '1'
+              and session.get('role') == 'admin')
+    if bypass:
+        log.warning("BYPASS_PAYMENT_GATE active: activating %s without payment", policy_no)
+        activate_paid_policy_and_enqueue_dmvic(
+            policy_no, source='payment_gate_bypass',
+            reference='bypass', user_id=session.get('user_id'),
+        )
+
     return jsonify({
-        "success":       True,
-        "policy_no":     policy_no,
-        "total_payable": float(q['total_payable']),
-        "message":       "Policy created. Payment pending confirmation."
+        "success":        True,
+        "policy_no":      policy_no,
+        "total_payable":  float(q['total_payable']),
+        "payment_bypass": bypass,
+        "message":        "Policy created. Payment pending confirmation."
     })
 
 

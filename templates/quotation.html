@@ -1648,6 +1648,8 @@ async function buyCover(quoteId) {
                 </a>
             </div>`;
 
+        if (r.payment_bypass) pollDmvicStatus(r.policy_no);
+
     } catch (err) {
         msg.style.color = '#dc2626';
         msg.innerText = 'Network error — please try again.';
