@@ -454,8 +454,7 @@ def buy_cover():
     _cache_delete_prefix("cache:dashboard")
     _cache_delete_prefix("cache:reports_summary")
 
-    # TEMP: testing only. Remove when done.
-    BYPASS_PAYMENT_GATE_ON = True   # TEMP: set to False and push when done fixing
+    BYPASS_PAYMENT_GATE_ON = False
     bypass = BYPASS_PAYMENT_GATE_ON and session.get('role') == 'admin'
     if bypass:
         log.warning("BYPASS_PAYMENT_GATE active: activating %s without payment", policy_no)

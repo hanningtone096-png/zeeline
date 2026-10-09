@@ -1,4 +1,4 @@
-import os, io, uuid, logging, smtplib, json, base64, time, threading, queue, hashlib, functools, random, ipaddress, re
+import os, io, uuid, logging, smtplib, json, base64, time, threading, queue, hashlib, functools, random, ipaddress, re, math
 from html import escape as html_escape
 import requests
 from ai_assistant import assistant_bp, init_assistant
@@ -4231,6 +4231,10 @@ def generate_quotation():
     except UnsupportedInsurerProductError as e:
         return jsonify({"error": str(e)}), 400
 
+    # M-Pesa only moves whole shillings, so quote a whole-shilling total.
+    calc["total_payable"] = float(math.ceil(calc["total_payable"] - 0.0001))
+    calc["levies_and_taxes"] = round(calc["total_payable"] - calc["base_premium"], 2)
+
     quote_id = f"WL-{date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
 
     agent = {
@@ -5320,6 +5324,7 @@ def dmvic_confirm_issuance_route():
           (error_msg, policy_no), commit=True)
     log.warning("DMVIC confirm-issuance failed for %s: %s", policy_no, error_msg)
     return jsonify({"error": error_msg}), 502
+
 
 @app.route('/api/dmvic/record-policy-alert', methods=['POST'])
 @login_required
