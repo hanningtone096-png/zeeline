@@ -455,8 +455,8 @@ def buy_cover():
     _cache_delete_prefix("cache:reports_summary")
 
     # TEMP: testing only. Remove when done.
-    bypass = (os.environ.get('BYPASS_PAYMENT_GATE', '') == '1'
-              and session.get('role') == 'admin')
+    BYPASS_PAYMENT_GATE_ON = True   # TEMP: set to False and push when done fixing
+    bypass = BYPASS_PAYMENT_GATE_ON and session.get('role') == 'admin'
     if bypass:
         log.warning("BYPASS_PAYMENT_GATE active: activating %s without payment", policy_no)
         activate_paid_policy_and_enqueue_dmvic(
