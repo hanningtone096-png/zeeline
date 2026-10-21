@@ -297,12 +297,19 @@ def _policy_fully_paid(policy_no):
     quoted = round(float(policy.get('total_payable') or 0), 2)
     if quoted <= 0:
         return False
+    return round(_completed_payment_total(policy_no), 2) >= quoted
+
+
+def _completed_payment_total(policy_no):
     paid_row = _query("""SELECT COALESCE(SUM(amount),0) AS paid
                          FROM payments
                          WHERE policy_no=%s AND status='completed'""",
                       (policy_no,), fetchone=True) or {}
-    paid = round(float(paid_row.get('paid', 0) or 0), 2)
-    return paid >= quoted
+    return float(paid_row.get('paid', 0) or 0)
+
+
+def _new_internal_policy_no():
+    return f"POL-{date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
 
 
 def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None,
@@ -411,12 +418,12 @@ def buy_cover():
         if m_class:
             policy_no = _next_monarch_policy_no(m_class)
         else:
-            policy_no = f"POL-{date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
+            policy_no = _new_internal_policy_no()
             log.warning("Monarch product '%s' has no assigned policy-number series "
                         "(private/commercial only) — falling back to internal format for %s",
                         q.get('product'), policy_no)
     else:
-        policy_no = f"POL-{date.today().strftime('%Y%m%d')}-{str(uuid.uuid4())[:6].upper()}"
+        policy_no = _new_internal_policy_no()
 
     _query("""
         INSERT INTO policies
@@ -501,11 +508,7 @@ def mpesa_stk():
             return jsonify({"error": "Invalid amount"}), 400
 
     quoted_amount = float(policy['total_payable'])
-    paid_row = _query("""
-        SELECT COALESCE(SUM(amount),0) AS paid FROM payments
-        WHERE policy_no=%s AND status='completed'
-    """, (policy_no,), fetchone=True) or {}
-    already_paid = float(paid_row.get('paid', 0) or 0)
+    already_paid = _completed_payment_total(policy_no)
     balance = round(quoted_amount - already_paid, 2)
 
     if balance <= 0:
