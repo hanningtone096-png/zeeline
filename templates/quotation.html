@@ -141,7 +141,6 @@
 .dmvic-status-box.issued  { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
 .dmvic-status-box.failed  { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; }
 .dmvic-status-box.manual  { background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; }
-
 .dmvic-confirm-overlay { display:none; position:fixed; inset:0; z-index:1200; background:rgba(15,23,42,.58); align-items:center; justify-content:center; padding:20px; }
 .dmvic-confirm-dialog { width:min(100%,520px); background:#fff; border-radius:8px; padding:22px; box-shadow:0 20px 50px rgba(15,23,42,.28); }
 .dmvic-confirm-dialog h3 { margin:0 0 8px; color:#1e293b; font-size:18px; }
@@ -1717,7 +1716,7 @@ function pollDmvicStatus(policyNo) {
         }
 
 
-     if (status === 'pending_manual') {
+        if (status === 'pending_manual') {
             box.className = 'dmvic-status-box manual';
             window._dmvicStatusCache = window._dmvicStatusCache || {};
             window._dmvicStatusCache[statusData.policy_no] = statusData;

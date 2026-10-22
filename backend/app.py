@@ -1854,10 +1854,8 @@ def _issue_dmvic_certificate_impl(policy_no, quote_row):
         except Exception as e:
             log.error("Certificate copy generation/email failed for %s: %s", policy_no, type(e).__name__)
     else:
-        # DMVIC Support confirmed on 2026-07-25 that policy alerts are produced
-        # by its record comparison and that this account has no manual policy
-        # confirmation path.  An IssuanceRequestID is therefore retained for
-        # traceability only; it must not be presented as an approval bypass.
+        # Keep DMVIC's original request ID so an authorized reviewer can send
+        # the manual confirmation using the request that raised this alert.
         issuance_request_id = result.get('issuance_request_id')
         error_codes = {str(code).upper() for code in (result.get('error_codes') or []) if code}
         is_policy_alert = bool(issuance_request_id or error_codes.intersection({'ER005', 'ER007'}))
@@ -1865,8 +1863,7 @@ def _issue_dmvic_certificate_impl(policy_no, quote_row):
             reason = result.get('error', 'DMVIC policy alert')
             msg = (f"DMVIC data review required: {reason} Verify the certificate type, "
                    "engine number, vehicle make and vehicle model against the logbook and "
-                   "the insurer's existing record, then re-quote. DMVIC does not provide a "
-                   "manual confirmation route for this alert.")
+                   "the insurer's existing record before approving or rejecting the alert.")
             query("""UPDATE policies
                       SET dmvic_status='pending_manual',
                           dmvic_issuance_request_id=%s,
@@ -5230,9 +5227,7 @@ def list_pending_dmvic_confirmations():
             "total_payable": policy.get('total_payable'),
             "dmvic_error": policy.get('dmvic_error'),
             "created_at": policy.get('created_at'),
-            # Only rows carrying DMVIC's IssuanceRequestID can be completed via
-            # /api/dmvic/confirm-issuance; the rest are data-correction holds
-            # (missing identity, unmapped product) that need a re-quote instead.
+            # A request ID is required for DMVIC's manual confirmation endpoint.
             "can_confirm": bool(policy.get('dmvic_issuance_request_id')),
         })
     return jsonify({"pending": pending})
@@ -5248,7 +5243,6 @@ def dmvic_confirm_issuance_route():
     is_logbook_verified = data.get('is_logbook_verified')
     is_vehicle_inspected = data.get('is_vehicle_inspected')
     additional_comments = (data.get('additional_comments') or '').strip()
-
     if not policy_no:
         return jsonify({"error": "policy_no is required"}), 400
     if not isinstance(is_approved, bool):
@@ -5330,7 +5324,7 @@ def dmvic_confirm_issuance_route():
 @login_required
 @admin_required
 def record_dmvic_policy_alert():
-    """Reject the obsolete recovery flow without sending DMVIC a bad request."""
+    """Store a request ID supplied by DMVIC Support for a pending alert."""
     data = request.get_json() or {}
     policy_no = (data.get('policy_no') or '').strip()
     issuance_request_id = (data.get('issuance_request_id') or '').strip()
@@ -5374,7 +5368,7 @@ def record_dmvic_policy_alert():
             f"Your policy {policy_no} was flagged for manual review.",
             link=f'/renewals?policy={policy_no}', user_id=agent_id)
 
-    return jsonify({"success": True, "message": "DMVIC alert recorded for data review; no manual confirmation request was sent."})
+    return jsonify({"success": True, "message": "DMVIC request ID updated. The alert is ready for manual review."})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
