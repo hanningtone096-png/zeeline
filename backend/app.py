@@ -174,6 +174,36 @@ if not ALLOWED_ORIGINS:
 
 CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 
+SYSTEM_MAINTENANCE = os.environ.get('SYSTEM_MAINTENANCE', '1').strip().lower() in {
+    '1', 'true', 'yes', 'on',
+}
+
+_MAINTENANCE_ALLOWED_ENDPOINTS = {
+    'api_login',
+    'logout',
+    'login_page',
+    'request_password_reset',
+    'confirm_password_reset',
+    'service_worker',
+    'static',
+}
+
+
+@app.before_request
+def restrict_access_during_maintenance():
+    if not SYSTEM_MAINTENANCE or session.get('role') == 'admin':
+        return None
+    if request.endpoint in _MAINTENANCE_ALLOWED_ENDPOINTS:
+        return None
+    if request.path.startswith('/api/'):
+        response = jsonify({"error": "System under maintenance"})
+    else:
+        response = render_template('maintenance.html')
+    response.status_code = 503
+    response.headers['Retry-After'] = '3600'
+    return response
+
+
 # ── CSRF protection (Flask-WTF) ──────────────────────────────────────────────
 # csrf_token() is NOT automatically available in templates just by
 # instantiating CSRFProtect — that only happens for WTForms-rendered forms.
