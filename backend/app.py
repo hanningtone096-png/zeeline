@@ -14,15 +14,6 @@ from reportlab.platypus import (
 # ── Base Directory setup (resolves paths absolute to app.py) ──────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ── DMVIC Certificate & Key Path Configuration ────────────────────────────────
-DMVIC_CERT_PATH = os.path.join(BASE_DIR, 'certs', 'dmvic', 'dmvic_prod_cert.pem')
-DMVIC_KEY_PATH = os.path.join(BASE_DIR, 'certs', 'dmvic', 'dmvic_prod_key.pem')
-
-# Convenience tuple if passing mTLS to requests (cert, key)
-DMVIC_CLIENT_CERT = (DMVIC_CERT_PATH, DMVIC_KEY_PATH) if (
-    os.path.exists(DMVIC_CERT_PATH) and os.path.exists(DMVIC_KEY_PATH)
-) else None
-
 # ── Load .env (if present) into os.environ BEFORE any require_env() calls ────
 try:
     from dotenv import load_dotenv
@@ -186,6 +177,7 @@ _MAINTENANCE_ALLOWED_ENDPOINTS = {
     'confirm_password_reset',
     'service_worker',
     'static',
+    'health',
 }
 
 
@@ -598,7 +590,7 @@ def notify_underpayment_attempt(agent, policy_no, quoted_amount, attempted_amoun
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DMVIC CONFIGURATION (Motor certificate issuance — UAT)
+# DMVIC CONFIGURATION (Motor certificate issuance — UAT or production)
 #
 # FIXED in v2.5: this entire block used to be accidentally indented inside
 # notify_underpayment_attempt() above, which made every name in it
@@ -619,14 +611,18 @@ DMVIC_API_USERNAME  = require_env('DMVIC_API_USERNAME', allow_dev_fallback='')
 DMVIC_API_PASSWORD  = require_env('DMVIC_API_PASSWORD', allow_dev_fallback='')
 DMVIC_CLIENT_ID     = require_env('DMVIC_CLIENT_ID', allow_dev_fallback='')
 DMVIC_IRA_NUMBER    = os.environ.get('DMVIC_IRA_NUMBER', '')
-DMVIC_CERT_PATH     = os.environ.get('DMVIC_CERT_PATH', 'backend/certs/dmvic/dmvic_uat_cert.pem')
-DMVIC_KEY_PATH      = os.environ.get('DMVIC_KEY_PATH', 'backend/certs/dmvic/dmvic_uat_key.pem')
+_dmvic_is_production_env = DMVIC_ENV.lower() in {'production', 'prod'}
+_dmvic_cert_name = 'dmvic_prod_cert.pem' if _dmvic_is_production_env else 'dmvic_uat_cert.pem'
+_dmvic_key_name = 'dmvic_prod_key.pem' if _dmvic_is_production_env else 'dmvic_uat_key.pem'
+_dmvic_cert_default = os.path.join(BASE_DIR, 'certs', 'dmvic', _dmvic_cert_name)
+_dmvic_key_default = os.path.join(BASE_DIR, 'certs', 'dmvic', _dmvic_key_name)
+DMVIC_CERT_PATH = os.environ.get('DMVIC_CERT_PATH', _dmvic_cert_default)
+DMVIC_KEY_PATH = os.environ.get('DMVIC_KEY_PATH', _dmvic_key_default)
 
 def dmvic_cert_tuple():
     """requests' cert= param expects (certfile, keyfile) for mTLS.
-    Resolves via DMVIC_CERT_PATH/DMVIC_KEY_PATH (which default to the UAT
-    cert/key, matching DMVIC_ENV/DMVIC_BASE_URL's UAT default) so the cert
-    pair always matches whichever DMVIC environment we're actually calling.
+    Resolves via DMVIC_CERT_PATH/DMVIC_KEY_PATH (which default to the cert/key
+    matching DMVIC_ENV) so the pair matches the environment we're calling.
     Returns None if the files aren't present so callers can fail loudly
     instead of requests silently sending no client cert."""
     cert_path = DMVIC_CERT_PATH if os.path.isabs(DMVIC_CERT_PATH) else os.path.join(BASE_DIR, DMVIC_CERT_PATH)
@@ -654,6 +650,89 @@ def dmvic_cert_tuple():
     log.warning("DMVIC mTLS cert or key missing at: %s / %s", cert_path, key_path)
     return None
 
+
+_dmvic_resolved_cert_path = (
+    os.path.abspath(DMVIC_CERT_PATH if os.path.isabs(DMVIC_CERT_PATH)
+                    else os.path.join(BASE_DIR, DMVIC_CERT_PATH))
+)
+_dmvic_resolved_key_path = (
+    os.path.abspath(DMVIC_KEY_PATH if os.path.isabs(DMVIC_KEY_PATH)
+                    else os.path.join(BASE_DIR, DMVIC_KEY_PATH))
+)
+log.info(
+    "DMVIC configuration base_url=%s env=%s cert_path=%s cert_exists=%s "
+    "key_path=%s key_exists=%s",
+    DMVIC_BASE_URL, DMVIC_ENV,
+    _dmvic_resolved_cert_path, os.path.isfile(_dmvic_resolved_cert_path),
+    _dmvic_resolved_key_path, os.path.isfile(_dmvic_resolved_key_path),
+)
+if IS_PRODUCTION and 'uat' in DMVIC_BASE_URL.lower():
+    log.error("DMVIC production is configured with a UAT base URL: %s", DMVIC_BASE_URL)
+if dmvic_cert_tuple() is None:
+    log.error("DMVIC client certificate tuple is missing")
+
+
+_DMVIC_REQUEST_ERRORS = {
+    'timeout': "DMVIC took too long to respond. Check the policy status before retrying.",
+    'ssl': "Could not establish a secure connection to DMVIC.",
+    'connection': "Could not establish a secure connection to DMVIC.",
+    'bad_response': "DMVIC returned an unexpected response. Try again later.",
+    'auth': "DMVIC rejected our credentials or access. Contact support.",
+    'unknown': "Could not reach DMVIC. Please try again.",
+}
+
+
+def _dmvic_request_failure(label, error, *, response=None, error_kind=None):
+    status = getattr(response, 'status_code', None)
+    if status is None:
+        status = getattr(getattr(error, 'response', None), 'status_code', None)
+
+    if error_kind is None:
+        if status in (401, 403):
+            error_kind = 'auth'
+        elif isinstance(error, requests.exceptions.Timeout):
+            error_kind = 'timeout'
+        elif isinstance(error, requests.exceptions.SSLError):
+            error_kind = 'ssl'
+        elif isinstance(error, requests.exceptions.ConnectionError):
+            error_kind = 'connection'
+        elif isinstance(error, ValueError):
+            error_kind = 'bad_response'
+        else:
+            error_kind = 'unknown'
+
+    log.error(
+        "DMVIC %s request failed kind=%s exception=%s: %s HTTP %s",
+        label, error_kind, type(error).__name__, str(error)[:200], status,
+    )
+    if error_kind == 'bad_response' and response is not None:
+        log.error(
+            "DMVIC %s invalid JSON response HTTP %s body=%s",
+            label, status, response.text[:300],
+        )
+    return {
+        "success": False,
+        "error": _DMVIC_REQUEST_ERRORS[error_kind],
+        "error_kind": error_kind,
+    }
+
+
+def _dmvic_json_response(label, response):
+    if response.status_code in (401, 403):
+        error = requests.exceptions.HTTPError(
+            f"DMVIC returned HTTP {response.status_code}", response=response,
+        )
+        return None, _dmvic_request_failure(label, error, response=response)
+    try:
+        return response.json(), None
+    except ValueError as error:
+        return None, _dmvic_request_failure(
+            label, error, response=response, error_kind='bad_response',
+        )
+    except Exception as error:
+        return None, _dmvic_request_failure(label, error, response=response)
+
+
 def _dmvic_timed_post(label, url, *, timeout, **kwargs):
     """requests.post wrapper that logs how long DMVIC took to answer.
 
@@ -664,8 +743,11 @@ def _dmvic_timed_post(label, url, *, timeout, **kwargs):
     started = time.time()
     try:
         res = requests.post(url, timeout=timeout, **kwargs)
-    except Exception:
-        log.error("DMVIC %s failed after %.1fs", label, time.time() - started)
+    except Exception as e:
+        log.error(
+            "DMVIC %s request exception=%s: %s after %.1fs",
+            label, type(e).__name__, str(e)[:200], time.time() - started,
+        )
         raise
     elapsed = time.time() - started
     if elapsed > 10:
@@ -793,9 +875,11 @@ def dmvic_get_token(force_refresh=False):
                 cert=dmvic_cert_tuple(),
                 timeout=15,
             )
-            data = res.json()
         except Exception as e:
-            log.error("DMVIC login error: %s: %s", type(e).__name__, e)
+            _dmvic_request_failure("token login", e)
+            return None
+        data, failure = _dmvic_json_response("token login", res)
+        if failure:
             return None
 
         if data.get("code") == 1 and data.get("token"):
@@ -893,10 +977,11 @@ def dmvic_validate_double_insurance(token, *, policy_start_date, policy_end_date
             cert=dmvic_cert_tuple(),
             timeout=20,
         )
-        data = res.json()
     except Exception as e:
-        log.error("DMVIC double-insurance lookup error: %s", type(e).__name__)
-        return {"success": False, "error": "Could not reach DMVIC."}
+        return _dmvic_request_failure("double-insurance check", e)
+    data, failure = _dmvic_json_response("double-insurance check", res)
+    if failure:
+        return failure
 
     if data.get("success"):
         matches = (data.get("callbackObj") or {}).get("DoubleInsurance") or []
@@ -945,10 +1030,11 @@ def dmvic_confirm_certificate_issuance(token, issuance_request_id, *, is_approve
             cert=dmvic_cert_tuple(),
             timeout=25,
         )
-        data = res.json()
     except Exception as e:
-        log.error("DMVIC confirm-issuance error: %s", type(e).__name__)
-        return {"success": False, "error": "Could not reach DMVIC. Please try again."}
+        return _dmvic_request_failure("confirm-issuance", e)
+    data, failure = _dmvic_json_response("confirm-issuance", res)
+    if failure:
+        return failure
 
     if data.get("success"):
         txn = (data.get("callbackObj") or {}).get("issueCertificate") or data.get("Transaction", {})
@@ -1032,10 +1118,11 @@ def dmvic_issue_certificate(token, *, member_company_id, cert_type, cover_type, 
             cert=dmvic_cert_tuple(),
             timeout=25,
         )
-        data = res.json()
     except Exception as e:
-        log.error("DMVIC issuance error: %s", type(e).__name__)
-        return {"success": False, "error": "Could not reach DMVIC. Please try again."}
+        return _dmvic_request_failure("Type A issuance", e)
+    data, failure = _dmvic_json_response("Type A issuance", res)
+    if failure:
+        return failure
 
     if data.get("success"):
         # Confirmed via live UAT test (2026-07-11, txn UAT-TAE4170): the
@@ -1135,10 +1222,11 @@ def dmvic_issue_certificate_type_b(token, *, member_company_id, cover_type, vehi
             cert=dmvic_cert_tuple(),
             timeout=25,
         )
-        data = res.json()
     except Exception as e:
-        log.error("DMVIC Type B issuance error: %s", type(e).__name__)
-        return {"success": False, "error": "Could not reach DMVIC. Please try again."}
+        return _dmvic_request_failure("Type B issuance", e)
+    data, failure = _dmvic_json_response("Type B issuance", res)
+    if failure:
+        return failure
 
     if data.get("success"):
         # Same nesting pattern confirmed for Type A — callbackObj.issueCertificate,
@@ -1229,10 +1317,11 @@ def dmvic_issue_certificate_type_c(token, *, member_company_id, cover_type, poli
             cert=dmvic_cert_tuple(),
             timeout=60,
         )
-        data = res.json()
     except Exception as e:
-        log.error("DMVIC Type C issuance error: %s", type(e).__name__)
-        return {"success": False, "error": "Could not reach DMVIC. Please try again."}
+        return _dmvic_request_failure("Type C issuance", e)
+    data, failure = _dmvic_json_response("Type C issuance", res)
+    if failure:
+        return failure
 
     if data.get("success"):
         txn = (data.get("callbackObj") or {}).get("issueCertificate") or data.get("Transaction", {})
@@ -1343,10 +1432,11 @@ def dmvic_issue_certificate_type_d(token, *, member_company_id, type_of_certific
             cert=dmvic_cert_tuple(),
             timeout=60,
         )
-        data = res.json()
     except Exception as e:
-        log.error("DMVIC Type D issuance error: %s", type(e).__name__)
-        return {"success": False, "error": "Could not reach DMVIC. Please try again."}
+        return _dmvic_request_failure("Type D issuance", e)
+    data, failure = _dmvic_json_response("Type D issuance", res)
+    if failure:
+        return failure
 
     if data.get("success"):
         # Same callbackObj.issueCertificate / actualCNo nesting confirmed for
@@ -2836,8 +2926,43 @@ def safe_error_response(exc, message="Something went wrong. Please try again.", 
 @app.errorhandler(500)
 def handle_500(e):
     ref = uuid.uuid4().hex[:10]
-    log.error("[err-%s] Unhandled 500: %s", ref, e)
-    return jsonify({"error": "We couldn't complete that request. Please try again.", "reference": ref}), 500
+    log.exception("[err-%s] Unhandled 500: %s", ref, e)
+    body = {"error": "We couldn't complete that request. Please try again.", "reference": ref}
+    if session.get('role') == 'admin':
+        orig = getattr(e, "original_exception", None) or e
+        body["debug"] = f"{type(orig).__name__}: {str(orig)[:300]}"
+    return jsonify(body), 500
+
+
+@app.route('/api/health')
+def health():
+    if session.get('role') != 'admin':
+        return jsonify({"error": "forbidden"}), 403
+
+    try:
+        query("SELECT COUNT(*) AS total FROM users", fetchone=True)
+        database_status = "ok"
+    except Exception as e:
+        database_status = f"fail: {type(e).__name__}: {str(e)[:120]}"
+
+    cert_path = (
+        os.path.abspath(DMVIC_CERT_PATH if os.path.isabs(DMVIC_CERT_PATH)
+                        else os.path.join(BASE_DIR, DMVIC_CERT_PATH))
+    )
+    key_path = (
+        os.path.abspath(DMVIC_KEY_PATH if os.path.isabs(DMVIC_KEY_PATH)
+                        else os.path.join(BASE_DIR, DMVIC_KEY_PATH))
+    )
+    return jsonify({
+        "database": database_status,
+        "dmvic_env": DMVIC_ENV,
+        "dmvic_base_url": DMVIC_BASE_URL,
+        "dmvic_cert_path": {"path": cert_path, "exists": os.path.isfile(cert_path)},
+        "dmvic_key_path": {"path": key_path, "exists": os.path.isfile(key_path)},
+        "dmvic_cert_tuple": "found" if dmvic_cert_tuple() is not None else "MISSING",
+        "is_production": IS_PRODUCTION,
+        "system_maintenance": SYSTEM_MAINTENANCE,
+    })
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5315,6 +5440,17 @@ def dmvic_confirm_issuance_route():
     query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
           (session['user_id'], action,
            f"policy={policy_no} issuance_request_id={issuance_request_id} approved={is_approved}"), commit=True)
+
+    if result.get('error_kind') in ('timeout', 'bad_response'):
+        error_msg = result.get('error', 'DMVIC confirmation outcome is uncertain.')
+        query("""UPDATE policies
+                 SET dmvic_status='pending_manual', dmvic_error=%s
+                 WHERE policy_no=%s""", (error_msg, policy_no), commit=True)
+        cache_delete_prefix("cache:dashboard")
+        return jsonify({
+            "error": f"{error_msg} Check this policy on the DMVIC portal before pressing "
+                     "Approve again; DMVIC may already have processed it."
+        }), 502
 
     if not is_approved:
         query("""UPDATE policies SET dmvic_status='failed',
