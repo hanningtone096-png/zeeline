@@ -30,7 +30,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from functools import wraps
 
-from flask import (Flask, render_template, request, jsonify, Response,
+from flask import (Flask, render_template, request, jsonify, Response, make_response,
                    session, redirect, send_file, abort)
 from flask_cors import CORS
 from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
@@ -165,7 +165,8 @@ if not ALLOWED_ORIGINS:
 
 CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 
-SYSTEM_MAINTENANCE = os.environ.get('SYSTEM_MAINTENANCE', '1').strip().lower() in {
+# Maintenance mode is opt-in through the SYSTEM_MAINTENANCE environment variable.
+SYSTEM_MAINTENANCE = os.environ.get('SYSTEM_MAINTENANCE', '0').strip().lower() in {
     '1', 'true', 'yes', 'on',
 }
 
@@ -178,6 +179,8 @@ _MAINTENANCE_ALLOWED_ENDPOINTS = {
     'service_worker',
     'static',
     'health',
+    'favicon',
+    'webmanifest',
 }
 
 
@@ -189,9 +192,9 @@ def restrict_access_during_maintenance():
         return None
     if request.path.startswith('/api/'):
         response = jsonify({"error": "System under maintenance"})
+        response.status_code = 503
     else:
-        response = render_template('maintenance.html')
-    response.status_code = 503
+        response = make_response(render_template('maintenance.html'), 503)
     response.headers['Retry-After'] = '3600'
     return response
 
