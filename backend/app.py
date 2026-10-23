@@ -165,10 +165,7 @@ if not ALLOWED_ORIGINS:
 
 CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 
-# Maintenance mode is opt-in through the SYSTEM_MAINTENANCE environment variable.
-SYSTEM_MAINTENANCE = os.environ.get('SYSTEM_MAINTENANCE', '0').strip().lower() in {
-    '1', 'true', 'yes', 'on',
-}
+SYSTEM_MAINTENANCE = True   # Set to False and redeploy to reopen the site to agents.
 
 _MAINTENANCE_ALLOWED_ENDPOINTS = {
     'api_login',
