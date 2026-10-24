@@ -27,6 +27,7 @@ from flask import Blueprint, request, jsonify, session, abort
 # premium_calc is a pure module (stdlib only), so importing it here does not
 # create the app.py <-> payments.py cycle this module otherwise avoids.
 from premium_calc import COMING_SOON_INSURERS
+from payment_amounts import amounts_cover_due, stk_amounts_match  # TEMP-BYPASS pay-first: cent-safe settlement.
 # mongo_store is a plain module (it does not import payments or app), so this
 # constant can be shared rather than re-listed here and drifting out of sync
 # with the copy activate_policy_after_payment() matches on.
@@ -311,10 +312,8 @@ def _policy_fully_paid(policy_no):
                     (policy_no,), fetchone=True)
     if not policy:
         return False
-    quoted = round(float(policy.get('total_payable') or 0), 2)
-    if quoted <= 0:
-        return False
-    return round(_completed_payment_total(policy_no), 2) >= quoted
+    # TEMP-BYPASS pay-first: compare cumulative settlements and due in integer cents.
+    return amounts_cover_due(_completed_payment_total(policy_no), policy.get('total_payable'))
 
 
 def _completed_payment_total(policy_no):
@@ -340,21 +339,17 @@ def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None,
     True if the policy transitioned to active on this call, False otherwise.
 
     `verified_amount` is the amount ArchPay's authenticated verify endpoint
-    reported for this checkout request. When both it and the server-pushed
-    amount are known they must match exactly — the payment stays pending and
-    the mismatch is audited otherwise, so a settlement that does not line up
-    with the STK push can never activate a policy or count toward the premium.
+    reported for this checkout request. It is matched to the whole-KES amount
+    actually sent by the existing STK push; mismatches remain pending and are
+    audited so a different settlement cannot count toward the premium.
     """
-    # Amount-match gate: the only valid amount is the one the server pushed
-    # for this checkout request (the outstanding balance at push time). A
-    # reported amount that differs means the settlement does not correspond
-    # to this payment — leave the row pending so it is not counted.
+    # TEMP-BYPASS pay-first: STK sends rounded whole KES while the stored amount retains cents.
     pushed_row = _query("SELECT amount FROM payments WHERE reference=%s",
                         (ref,), fetchone=True) or {}
     pushed_amount = pushed_row.get('amount')
     if verified_amount is not None and pushed_amount is not None:
         try:
-            matches = round(float(pushed_amount), 2) == round(float(verified_amount), 2)
+            matches = stk_amounts_match(pushed_amount, verified_amount)
         except (TypeError, ValueError):
             matches = False
         if not matches:

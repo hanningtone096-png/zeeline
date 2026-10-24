@@ -1728,8 +1728,13 @@ function pollDmvicStatus(policyNo) {
         }
         if (status === 'failed') {
             box.className = 'dmvic-status-box failed';
+            // TEMP-BYPASS pay-first: point ER005 failures to the double-insurance check without retrying.
+            const issuanceError = statusData.error || 'Unknown error — check Renewals for status.';
+            const doubleInsuranceHelp = /ER005/i.test(issuanceError)
+                ? '<br><a href="/dashboard#sectionDoubleCheck" style="color:#1d4ed8;">Check for Double Insurance</a>'
+                : '';
             box.innerHTML = `<i class="fas fa-times-circle"></i> <strong>DMVIC Issuance Failed</strong><br>
-                <span style="font-size:12px;">${esc(statusData.error || 'Unknown error — check Renewals for status.')}</span>`;
+                <span style="font-size:12px;">${esc(issuanceError)}</span>${doubleInsuranceHelp}`;
             return true;
         }
 

@@ -23,7 +23,7 @@ except ImportError:
     logging.warning("python-dotenv not installed — .env file will not be loaded automatically. "
                     "Run `pip install python-dotenv`, or export the required env vars manually.")
 
-BYPASS_PAY_FIRST = True   # TEMP-BYPASS pay-first: set to False and push to restore the payment requirement
+BYPASS_PAY_FIRST = False   # TEMP-BYPASS pay-first: set to True and push to re-enable the bypass
 
 from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -39,6 +39,8 @@ from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
 from mongo_store import MongoStore
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+# TEMP-BYPASS pay-first: shared currency-safe comparisons for the payment gate and status response.
+from payment_amounts import amount_to_cents, amounts_cover_due
 
 # DMVIC product classification (psv/commercial/private/motorcycle buckets).
 try:
@@ -3460,6 +3462,10 @@ def dashboard():
 @app.route('/quotation')
 @login_required
 def quotation_page():
+    # TEMP-BYPASS pay-first: preserve pending-account access rules when maintenance is disabled.
+    user = query("SELECT status FROM users WHERE id=%s", (session['user_id'],), fetchone=True)
+    if user and user['status'] != 'approved' and session.get('role') != 'admin':
+        return redirect('/pending')
     # TEMP-BYPASS pay-first: expose the switch to the issuance status UI.
     return render_template('quotation.html', bypass_pay_first=BYPASS_PAY_FIRST)
 
@@ -4678,13 +4684,16 @@ def policy_dmvic_status(policy_no):
     # policy/period (each instalment stage is its own policy with the
     # per-stage premium as total_payable), and paid counts every settled
     # payment cumulatively. balance > 0 keeps the policy short of activation.
-    amount_due = round(float(row.get('total_payable') or 0), 2)
+    # TEMP-BYPASS pay-first: compare and report monetary values at cent precision.
+    amount_due_cents = amount_to_cents(row.get('total_payable'))
     paid_row = query("""SELECT COALESCE(SUM(amount),0) AS paid
                         FROM payments
                         WHERE policy_no=%s AND status='completed'""",
                      (policy_no,), fetchone=True) or {}
-    amount_paid = round(float(paid_row.get('paid', 0) or 0), 2)
-    balance = round(max(0.0, amount_due - amount_paid), 2)
+    amount_paid_cents = amount_to_cents(paid_row.get('paid'))
+    amount_due = amount_due_cents / 100
+    amount_paid = amount_paid_cents / 100
+    balance = max(0, amount_due_cents - amount_paid_cents) / 100
 
     return jsonify({
         "policy_no":       row.get('policy_no'),
@@ -4692,7 +4701,7 @@ def policy_dmvic_status(policy_no):
         "amount_due":      amount_due,
         "amount_paid":     amount_paid,
         "balance":         balance,
-        "fully_paid":      amount_due > 0 and amount_paid >= amount_due,
+        "fully_paid":      amounts_cover_due(amount_paid_cents / 100, amount_due_cents / 100),
         "dmvic_status":    row.get('dmvic_status'),
         "certificate_no":  row.get('dmvic_certificate_no'),
         "transaction_no":  row.get('dmvic_transaction_no'),
