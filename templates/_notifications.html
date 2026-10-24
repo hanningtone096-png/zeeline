@@ -31,6 +31,9 @@
     var listEl   = document.getElementById('notifList');
     var markAll  = document.getElementById('notifMarkAll');
     var openBell = null;
+    // TEMP-BYPASS pay-first: back off quietly when notification polling fails.
+    var pollFailures = 0;
+    var pollTimer = null;
 
     // Re-parent the dropdown to <body> so it is never trapped inside a
     // display:none header (the desktop top-header is hidden on mobile).
@@ -94,11 +97,25 @@
         }).join('');
     }
 
+    // TEMP-BYPASS pay-first: schedule another poll only after success or bounded backoff.
     function load() {
+        if (pollTimer) clearTimeout(pollTimer);
         fetch('/api/notifications', { headers: { 'X-CSRFToken': CSRF } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) render(d.items, d.unread_count); })
-            .catch(function () {});
+            .then(function (r) {
+                if (!r.ok) throw new Error('Notification request failed.');
+                return r.json();
+            })
+            .then(function (d) {
+                if (!d || !Array.isArray(d.items)) throw new Error('Invalid notifications response.');
+                pollFailures = 0;
+                render(d.items, d.unread_count);
+                pollTimer = setTimeout(load, 45000);
+            })
+            .catch(function () {
+                pollFailures += 1;
+                var delay = Math.min(900000, 45000 * Math.pow(2, Math.min(pollFailures, 5)));
+                pollTimer = setTimeout(load, delay);
+            });
     }
 
     function markRead(id) {
@@ -157,8 +174,7 @@
     window.addEventListener('resize', function () { if (!dropdown.hidden && openBell) positionDropdown(openBell); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
 
-    // Initial load + periodic refresh while the page is open.
+    // TEMP-BYPASS pay-first: schedule each poll after its result to support exponential backoff.
     load();
-    setInterval(load, 45000);
 })();
 </script>

@@ -1577,7 +1577,11 @@ async function buyCover(quoteId) {
         return;
     }
 
-    if (!confirm('Confirm purchase of cover for this client?\nA policy will be created and payment marked as pending.')) {
+    // TEMP-BYPASS pay-first: describe the active issuance path accurately in the confirmation prompt.
+    const purchaseConfirmation = BYPASS_PAY_FIRST
+        ? 'Confirm purchase of cover for this client?\nA policy will be created and sent for DMVIC issuance without waiting for payment.'
+        : 'Confirm purchase of cover for this client?\nA policy will be created and payment marked as pending.';
+    if (!confirm(purchaseConfirmation)) {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-shield-alt"></i> BUY COVER';
         return;
@@ -1905,6 +1909,15 @@ async function initiateMpesa(policyNo) {
 
                 if (qd.success) {
                     clearInterval(poll);
+                    // TEMP-BYPASS pay-first: a provider success rejected by the settlement checks must not prompt another payment.
+                    if (qd.settlement_recorded === false) {
+                        msgEl.style.color = '#d97706';
+                        msgEl.innerHTML = '<strong>Payment verification needs review.</strong><br>' +
+                            '<span style="font-size:12px; color:#64748b;">The payment provider confirmed this transaction, but it was not reconciled to the policy. Do not submit another payment; contact an administrator.</span>';
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> Payment needs review';
+                        return;
+                    }
                     // The payment settled, but the policy only activates once
                     // cumulative payments cover the quoted premium — check the
                     // balance before claiming success.

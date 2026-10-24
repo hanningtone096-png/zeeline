@@ -24,7 +24,7 @@ except ImportError:
                     "Run `pip install python-dotenv`, or export the required env vars manually.")
 
 # TEMP-BYPASS pay-first: remove after balance bug is fixed.
-BYPASS_PAY_FIRST = os.getenv("BYPASS_PAY_FIRST", "false").lower() == "true"
+BYPASS_PAY_FIRST = os.getenv("BYPASS_PAY_FIRST", "false").strip().lower() in {"true", "1", "yes"}
 
 from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -144,6 +144,8 @@ def require_env(name, allow_dev_fallback=None):
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
+# TEMP-BYPASS pay-first: make the effective startup setting visible in host logs.
+log.info("BYPASS_PAY_FIRST=%s", BYPASS_PAY_FIRST)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1978,8 +1980,18 @@ def _issue_dmvic_certificate_impl(policy_no, quote_row):
         # the manual confirmation using the request that raised this alert.
         issuance_request_id = result.get('issuance_request_id')
         error_codes = {str(code).upper() for code in (result.get('error_codes') or []) if code}
-        is_policy_alert = bool(issuance_request_id or error_codes.intersection({'ER005', 'ER007'}))
-        if is_policy_alert:
+        # TEMP-BYPASS pay-first: ER005 is terminal double insurance, never a manual retry/confirmation.
+        if 'ER005' in error_codes:
+            msg = result.get('error') or f"[ER005] {DMVIC_ERROR_MESSAGES['ER005']}"
+            query("""UPDATE policies
+                      SET dmvic_status='failed',
+                          dmvic_issuance_request_id=NULL,
+                          dmvic_error=%s
+                      WHERE policy_no=%s""",
+                  (msg, policy_no), commit=True)
+            log.warning("DMVIC ER005 double-insurance rejection for %s: %s", policy_no, msg)
+        elif issuance_request_id or 'ER007' in error_codes:
+            # TEMP-BYPASS pay-first: only non-ER005 policy alerts may enter manual confirmation.
             reason = result.get('error', 'DMVIC policy alert')
             msg = (f"DMVIC data review required: {reason} Verify the certificate type, "
                    "engine number, vehicle make and vehicle model against the logbook and "
@@ -2976,6 +2988,8 @@ def health():
     )
     return jsonify({
         "database": database_status,
+        # TEMP-BYPASS pay-first: report the value effective in this worker.
+        "bypass_pay_first": BYPASS_PAY_FIRST,
         "dmvic_env": DMVIC_ENV,
         "dmvic_base_url": DMVIC_BASE_URL,
         "dmvic_cert_path": {"path": cert_path, "exists": os.path.isfile(cert_path)},
@@ -3840,20 +3854,22 @@ def get_notifications():
     role = session.get('role')
     uid  = session.get('user_id')
     try:
+        # TEMP-BYPASS pay-first: treat a missing notification result as an empty list.
         if role == 'admin':
             rows = query("""SELECT id, user_id, type, title, message, link,
                                    is_read, created_at
                             FROM notifications
                             ORDER BY created_at DESC
-                            LIMIT 50""")
+                            LIMIT 50""") or []
         else:
             rows = query("""SELECT id, user_id, type, title, message, link,
                                    is_read, created_at
                             FROM notifications
                             WHERE user_id=%s
                             ORDER BY created_at DESC
-                            LIMIT 50""", (uid,))
-        unread = sum(1 for r in rows if not r['is_read'])
+                            LIMIT 50""", (uid,)) or []
+        # TEMP-BYPASS pay-first: old notification documents may omit is_read.
+        unread = sum(1 for r in rows if not r.get('is_read'))
         return jsonify({"items": rows, "unread_count": unread})
     except Exception as e:
         return safe_error_response(e, "Could not load notifications.")

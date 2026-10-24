@@ -5,10 +5,11 @@
  * Dynamic /api/* responses are NEVER cached — only same-origin static assets
  * and third-party CDN/font payloads used to render the shell.
  */
-const CACHE = 'westlake-shell-v1';
+// TEMP-BYPASS pay-first: clear cached navigation HTML that may render an outdated flag state.
+const CACHE = 'westlake-shell-v2';
 
 const SHELL = [
-  '/',
+  // TEMP-BYPASS pay-first: keep only versioned static assets in the offline shell cache.
   '/manifest.webmanifest',
   '/css/dashboard.css',
   '/css/images/favicon.png',
@@ -67,16 +68,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin navigations: network-first, fall back to cached shell offline.
+  // TEMP-BYPASS pay-first: never cache rendered HTML, which includes the server-side flag value.
   if (req.mode === 'navigate' && url.origin === self.location.origin) {
     event.respondWith(
-      fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
-        return res;
-      }).catch(() =>
-        caches.match(req).then((r) => r || caches.match('/'))
-      )
+      fetch(req).catch(() => new Response(
+        '<!doctype html><title>Offline</title><p>This page is unavailable while offline. Reconnect and reload.</p>',
+        { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+      ))
     );
     return;
   }

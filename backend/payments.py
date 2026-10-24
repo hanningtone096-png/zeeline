@@ -629,6 +629,12 @@ def mpesa_query():
             user_id=session.get('user_id'),
             verified_amount=result.get('amount'),
         )
+        # TEMP-BYPASS pay-first: distinguish provider success from a recorded settlement.
+        recorded_payment = _query(
+            "SELECT status FROM payments WHERE reference=%s",
+            (checkout_request_id,), fetchone=True,
+        ) or {}
+        result['settlement_recorded'] = recorded_payment.get('status') == 'completed'
     return jsonify(result)
 
 
