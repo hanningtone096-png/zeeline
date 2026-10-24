@@ -171,7 +171,7 @@ if not ALLOWED_ORIGINS:
 
 CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 
-SYSTEM_MAINTENANCE = True   # Set to False and redeploy to reopen the site to agents.
+SYSTEM_MAINTENANCE = False   # Set to True and redeploy to restrict access again.
 
 _MAINTENANCE_ALLOWED_ENDPOINTS = {
     'api_login',
