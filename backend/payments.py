@@ -20,6 +20,7 @@ import ipaddress
 from datetime import date
 from collections import defaultdict, deque
 from functools import wraps
+from html import escape as html_escape
 
 import requests
 from flask import Blueprint, request, jsonify, session, abort
@@ -27,7 +28,7 @@ from flask import Blueprint, request, jsonify, session, abort
 # premium_calc is a pure module (stdlib only), so importing it here does not
 # create the app.py <-> payments.py cycle this module otherwise avoids.
 from premium_calc import COMING_SOON_INSURERS
-from payment_amounts import amounts_cover_due, stk_amounts_match  # TEMP-BYPASS pay-first: cent-safe settlement.
+from payment_amounts import amounts_cover_due, resolve_stk_amount, stk_amounts_match  # TEMP-BYPASS pay-first: cent-safe settlement.
 # mongo_store is a plain module (it does not import payments or app), so this
 # constant can be shared rather than re-listed here and drifting out of sync
 # with the copy activate_policy_after_payment() matches on.
@@ -39,6 +40,9 @@ payments_bp = Blueprint('payments', __name__, url_prefix='/api')
 
 ENV = os.environ.get('FLASK_ENV', 'production').lower()
 IS_PRODUCTION = ENV == 'production'
+
+ADMIN_MIN_STK_AMOUNT = 1
+MPESA_MAX_STK_AMOUNT = 250000
 
 
 def require_env(name, allow_dev_fallback=None):
@@ -64,16 +68,19 @@ _monarch_policy_class = None
 _next_monarch_policy_no = None
 _notify_underpayment_attempt = None
 _push_notification = None
+_send_email = None
+_company_email = None
 _bypass_pay_first = False  # TEMP-BYPASS pay-first: configured once by app.py.
 
 
 def init_payments(app, *, csrf, query, mongo_store, enqueue, issue_dmvic_certificate,
                    cache_delete_prefix, safe_error_response, monarch_policy_class,
                    next_monarch_policy_no, notify_underpayment_attempt, push_notification,
-                   bypass_pay_first):
+                   send_email, company_email, bypass_pay_first):
     global _query, _mongo_store, _enqueue, _issue_dmvic_certificate
     global _cache_delete_prefix, _safe_error_response, _monarch_policy_class
     global _next_monarch_policy_no, _notify_underpayment_attempt, _push_notification
+    global _send_email, _company_email
     global _bypass_pay_first
     _query = query
     _mongo_store = mongo_store
@@ -85,6 +92,8 @@ def init_payments(app, *, csrf, query, mongo_store, enqueue, issue_dmvic_certifi
     _next_monarch_policy_no = next_monarch_policy_no
     _notify_underpayment_attempt = notify_underpayment_attempt
     _push_notification = push_notification
+    _send_email = send_email
+    _company_email = company_email
     # TEMP-BYPASS pay-first: consume the one flag read by app.py.
     _bypass_pay_first = bypass_pay_first
 
@@ -503,10 +512,9 @@ def mpesa_stk():
     d         = request.get_json() or {}
     policy_no = d.get('policy_no', '').strip()
     phone     = d.get('phone', '').strip()
-    # The quoted premium is not editable: the charge is always the outstanding
-    # balance computed below. A client-supplied amount is only checked so a
-    # stale/tampered request that tries to pay less is rejected outright.
-    requested_amount = d.get('amount')
+    is_admin = session.get('role') == 'admin'
+    requested_amount = d.get('amount') if is_admin else None
+    override_reason = d.get('reason') if is_admin else None
 
     if not policy_no or not phone:
         return jsonify({"error": "policy_no and phone are required"}), 400
@@ -517,51 +525,22 @@ def mpesa_stk():
     if session['role'] != 'admin' and policy['agent_id'] != session['user_id']:
         return jsonify({"error": "You do not have access to this policy"}), 403
 
-    if requested_amount is not None and requested_amount != '':
-        try:
-            requested_amount = float(requested_amount)
-        except (TypeError, ValueError):
-            return jsonify({"error": "Invalid amount"}), 400
-
     quoted_amount = float(policy['total_payable'])
     already_paid = _completed_payment_total(policy_no)
     balance = round(quoted_amount - already_paid, 2)
 
-    if balance <= 0:
-        return jsonify({"error": "This policy has already been paid in full."}), 400
-
-    # Charge the full outstanding balance, whatever the client claims.
-    amount = balance
-
-    if requested_amount is not None and requested_amount < balance:
-        agent = {
-            'name':  session.get('name', session.get('username')),
-            'email': session.get('email', ''),
-        }
-        shortfall = balance - requested_amount
-        flag_reason = (f"Tried to pay KES {requested_amount:,.0f} against policy {policy_no}, "
-                       f"KES {shortfall:,.0f} below the outstanding balance of KES {balance:,.0f} "
-                       f"(on {time.strftime('%Y-%m-%d %H:%M')}).")
-
-        try:
-            _query("""UPDATE users
-                     SET flagged=1, flagged_reason=%s, flagged_at=NOW(),
-                         underpayment_attempts = underpayment_attempts + 1
-                     WHERE id=%s""",
-                   (flag_reason, session['user_id']), commit=True)
-        except Exception as e:
-            log.error("Could not flag account for underpayment (has "
-                      "migrations_add_underpayment_flag.sql been run?): %s", type(e).__name__)
-
-        _enqueue("underpayment_alert", _notify_underpayment_attempt,
-                 agent, policy_no, balance, requested_amount, phone)
-
-        _query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
-               (session['user_id'], 'underpayment_warning',
-                f"policy={policy_no} balance={balance} attempted={requested_amount}"), commit=True)
-
-        return jsonify({"error": "The premium is locked to the quoted amount — "
-                                 "partial payments are not accepted."}), 400
+    try:
+        amount, admin_override, override_reason = resolve_stk_amount(
+            session.get('role'),
+            requested_amount,
+            balance,
+            override_reason,
+            min_amount=ADMIN_MIN_STK_AMOUNT,
+            max_amount=MPESA_MAX_STK_AMOUNT,
+            policy_status=policy.get('status'),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     result = mpesa_stk_push(phone=phone, amount=amount,
                              account_ref=policy_no, description='Insurance Premium')
@@ -578,17 +557,51 @@ def mpesa_stk():
                        WHERE policy_no=%s AND method='mpesa' AND status='pending'""",
                      (policy_no,), fetchone=True)
     if pending:
-        _query("""UPDATE payments SET amount=%s, reference=%s, paid_at=NULL
+        _query("""UPDATE payments
+                  SET amount=%s, reference=%s, paid_at=NULL,
+                      admin_override=%s, override_reason=%s
                  WHERE id=%s""",
-               (amount, result['checkout_request_id'], pending['id']), commit=True)
+               (amount, result['checkout_request_id'], admin_override,
+                override_reason, pending['id']), commit=True)
     else:
-        _query("INSERT INTO payments (policy_no, amount, status, method, reference) VALUES (%s,%s,'pending','mpesa',%s)",
-               (policy_no, amount, result['checkout_request_id']), commit=True)
+        _query("""INSERT INTO payments
+                  (policy_no, amount, status, method, reference, admin_override, override_reason)
+                  VALUES (%s,%s,'pending','mpesa',%s,%s,%s)""",
+               (policy_no, amount, result['checkout_request_id'],
+                admin_override, override_reason), commit=True)
+
+    if is_admin:
+        amount_sent = max(1, int(round(float(amount))))
+        phone_used = mpesa_format_phone(phone) or phone
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        detail = (
+            f"policy={policy_no} outstanding_balance={balance:.2f} "
+            f"amount_sent={amount_sent} admin_override={str(admin_override).lower()} "
+            f"reason={override_reason or '—'} phone={phone_used} timestamp={timestamp}"
+        )
+        _query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+               (session['user_id'], 'admin_mpesa_stk_push', detail), commit=True)
+
+        if admin_override:
+            html = (
+                "<h2>Admin M-Pesa Amount Override</h2>"
+                f"<p><b>Admin user ID:</b> {html_escape(str(session['user_id']))}<br>"
+                f"<b>Policy:</b> {html_escape(policy_no)}<br>"
+                f"<b>Outstanding balance:</b> KES {balance:,.2f}<br>"
+                f"<b>Amount sent:</b> KES {amount_sent:,}<br>"
+                f"<b>Reason:</b> {html_escape(override_reason or '')}<br>"
+                f"<b>Phone:</b> {html_escape(phone_used)}<br>"
+                f"<b>Timestamp:</b> {html_escape(timestamp)}</p>"
+            )
+            if not _send_email(_company_email, f"Admin M-Pesa override — {policy_no}", html):
+                log.error("Admin M-Pesa override email was not sent for policy %s", policy_no)
 
     return jsonify({
         "success":             True,
         "checkout_request_id": result['checkout_request_id'],
         "customer_message":    result.get('customer_message', 'Check your phone for the M-Pesa prompt.'),
+        "amount":              max(1, int(round(float(amount)))),
+        "balance":             balance,
     })
 
 

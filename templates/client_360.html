@@ -128,8 +128,8 @@
 
 <div class="tab-panel" id="tabPayments">
     <div class="panel"><div class="tbl-wrap">
-        <table class="tbl"><thead><tr><th>Policy</th><th>Amount</th><th>Method</th><th>Status</th><th>Reference</th><th>Date</th></tr></thead>
-        <tbody id="paymentsBody"><tr><td colspan="6" class="muted" style="text-align:center;">Loading…</td></tr></tbody></table>
+        <table class="tbl"><thead><tr><th>Policy</th><th>Amount</th><th>Method</th><th>Status</th><th>Override</th><th>Reference</th><th>Date</th></tr></thead>
+        <tbody id="paymentsBody"><tr><td colspan="7" class="muted" style="text-align:center;">Loading…</td></tr></tbody></table>
     </div></div>
 </div>
 
@@ -215,9 +215,10 @@ function render(d){
             <td>${kes(x.amount)}</td>
             <td>${esc(x.method||'—')}</td>
             <td>${badge(x.status)}</td>
+            <td>${x.admin_override ? `<strong>Admin override</strong><br><small>${esc(x.override_reason||'—')}</small>` : '—'}</td>
             <td>${esc(x.reference||'—')}</td>
             <td>${fmtDt(x.paid_at||x.created_at)}</td>
-        </tr>`).join('') : '<tr><td colspan="6" class="empty">No payment history.</td></tr>';
+        </tr>`).join('') : '<tr><td colspan="7" class="empty">No payment history.</td></tr>';
 
     // Documents
     const docs = d.documents || [];

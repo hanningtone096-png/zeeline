@@ -514,6 +514,7 @@
 <script>
 // TEMP-BYPASS pay-first: use the server-provided issuance-only switch.
 const BYPASS_PAY_FIRST = {{ bypass_pay_first | tojson }};
+const IS_ADMIN = {{ is_admin | tojson }};
 let currentStep = 1;
 
 // CSRF token, read once from the meta tag rendered by Flask-WTF.
@@ -521,6 +522,30 @@ const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content ||
 
 function withCsrf(headers = {}) {
     return { ...headers, 'X-CSRFToken': CSRF_TOKEN };
+}
+
+function updateAdminOverrideReason() {
+    const amountInput = document.getElementById('mpesa_amount');
+    const reasonWrap = document.getElementById('mpesa_reason_wrap');
+    const reasonInput = document.getElementById('mpesa_reason');
+    if (!IS_ADMIN || !amountInput || !reasonWrap || !reasonInput) return;
+    const amountDiffers = amountInput.value === '' ||
+        Number(amountInput.value) !== Number(amountInput.max);
+    reasonWrap.style.display = amountDiffers ? '' : 'none';
+    reasonInput.required = amountDiffers;
+}
+
+function updateMpesaOutstandingBalance(balance) {
+    const amountDisplay = document.getElementById('mpesa_amount_display');
+    const amountInput = document.getElementById('mpesa_amount');
+    const currentBalance = Number(balance || 0);
+    if (amountDisplay) amountDisplay.textContent =
+        `KES ${currentBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+    if (IS_ADMIN && amountInput) {
+        amountInput.max = String(currentBalance);
+        amountInput.value = String(Math.max(1, Math.floor(currentBalance)));
+        updateAdminOverrideReason();
+    }
 }
 
 const data = {
@@ -1642,9 +1667,21 @@ async function buyCover(quoteId) {
                 <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
                     <input id="mpesa_phone" placeholder="07XXXXXXXX" value="${esc(policyPhone)}"
                         style="padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; width:165px; box-sizing:border-box;">
-                    <span style="padding:9px 12px; border:1px solid #bbf7d0; background:#f0fdf4; border-radius:6px; font-size:14px; font-weight:700; color:#15803d; box-sizing:border-box;">
-                        KES ${Number(r.total_payable || 0).toLocaleString()}
+                    {% if is_admin %}
+                    <input id="mpesa_amount" type="number" min="1" step="1"
+                        max="${Number(r.total_payable || 0)}"
+                        value="${Math.max(1, Math.floor(Number(r.total_payable || 0)))}"
+                        oninput="updateAdminOverrideReason()"
+                        aria-label="M-Pesa amount in whole shillings"
+                        style="padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; width:165px; box-sizing:border-box;">
+                    <span id="mpesa_amount_display" style="font-size:12px;color:#475569;">
+                        Balance: KES ${Number(r.total_payable || 0).toLocaleString()}
                     </span>
+                    {% else %}
+                    <span style="padding:9px 12px; border:1px solid #bbf7d0; background:#f0fdf4; border-radius:6px; font-size:14px; font-weight:700; color:#15803d; box-sizing:border-box;">
+                        <span id="mpesa_amount_display">KES ${Number(r.total_payable || 0).toLocaleString()}</span>
+                    </span>
+                    {% endif %}
                     <button onclick="initiateMpesa('${esc(r.policy_no)}')" id="mpesaBtn"
                         style="background:linear-gradient(135deg,#16a34a,#15803d); color:#fff; border:none;
                                padding:9px 16px; border-radius:6px; font-weight:700; cursor:pointer;
@@ -1652,7 +1689,19 @@ async function buyCover(quoteId) {
                         <i class="fas fa-mobile-alt"></i> Pay via M-Pesa
                     </button>
                 </div>
+                {% if is_admin %}
+                <div id="mpesa_reason_wrap" style="display:none;margin-bottom:8px;">
+                    <label for="mpesa_reason" style="display:block;font-size:13px;color:#334155;margin-bottom:4px;">
+                        Reason for changing the amount
+                    </label>
+                    <input id="mpesa_reason" type="text" minlength="5" maxlength="500"
+                        placeholder="At least 5 characters"
+                        style="padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;width:min(100%,420px);box-sizing:border-box;">
+                </div>
+                <small style="color:#b45309;">Admin override: this change is logged.</small>
+                {% else %}
                 <small style="color:#94a3b8;">The premium is fixed to the quoted amount — partial payments are not accepted.</small>
+                {% endif %}
                 <div id="mpesaMsg" style="font-size:13px; margin-top:8px;"></div>
                 <a href="/renewals" style="font-size:13px; color:#2563eb; text-decoration:none;">
                     <i class="fas fa-sync"></i> View in Renewals
@@ -1660,6 +1709,7 @@ async function buyCover(quoteId) {
             </div>`;
 
         if (r.payment_bypass) pollDmvicStatus(r.policy_no);
+        if (IS_ADMIN) updateAdminOverrideReason();
 
     } catch (err) {
         msg.style.color = '#dc2626';
@@ -1693,6 +1743,7 @@ function pollDmvicStatus(policyNo) {
             }
             const paid = Number(statusData.amount_paid || 0);
             const bal  = Number(statusData.balance || 0);
+            updateMpesaOutstandingBalance(bal);
             box.className = 'dmvic-status-box pending';
             if (paid > 0 && bal > 0) {
                 box.innerHTML = `<i class="fas fa-clock"></i> Part payment received —
@@ -1874,6 +1925,27 @@ async function initiateMpesa(policyNo) {
 
     if (!phone) { msgEl.style.color='#dc2626'; msgEl.innerText='Please enter a phone number.'; return; }
 
+    const requestBody = { policy_no: policyNo, phone };
+    if (IS_ADMIN) {
+        const amountInput = document.getElementById('mpesa_amount');
+        const reasonInput = document.getElementById('mpesa_reason');
+        const amount = Number(amountInput?.value);
+        const balance = Number(amountInput?.max);
+        const amountDiffers = amount !== balance;
+        if (!amountInput || !Number.isInteger(amount) || amount < 1 || amount > balance) {
+            msgEl.style.color = '#dc2626';
+            msgEl.innerText = 'Enter a whole-shilling amount between KES 1 and the outstanding balance.';
+            return;
+        }
+        if (amountDiffers && (reasonInput?.value.trim().length || 0) < 5) {
+            msgEl.style.color = '#dc2626';
+            msgEl.innerText = 'Enter a reason of at least 5 characters for changing the amount.';
+            return;
+        }
+        requestBody.amount = amount;
+        requestBody.reason = reasonInput?.value.trim() || '';
+    }
+
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending prompt...';
     msgEl.innerText = '';
@@ -1882,7 +1954,7 @@ async function initiateMpesa(policyNo) {
         const res  = await fetch('/api/mpesa/stk', {
             method:  'POST',
             headers: withCsrf({ 'Content-Type': 'application/json' }),
-            body:    JSON.stringify({ policy_no: policyNo, phone })
+            body:    JSON.stringify(requestBody)
         });
         const d = await res.json();
 
@@ -1944,6 +2016,7 @@ async function initiateMpesa(policyNo) {
                             <span style="font-size:12px; color:#64748b;">Policy is now active. Preparing the DMVIC certificate…</span>`;
                         btn.style.display = 'none';
                     } else {
+                        updateMpesaOutstandingBalance(balance);
                         msgEl.style.color = '#d97706';
                         msgEl.innerHTML   = `<strong><i class="fas fa-circle-half-stroke"></i> Part payment received — KES ${paid.toLocaleString()}.</strong><br>
                             <span style="font-size:12px; color:#64748b;">KES ${balance.toLocaleString()} still owed. The DMVIC certificate is issued only once the premium is settled in full.</span>`;

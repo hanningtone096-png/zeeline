@@ -3030,6 +3030,8 @@ init_payments(
     next_monarch_policy_no=next_monarch_policy_no,
     notify_underpayment_attempt=notify_underpayment_attempt,
     push_notification=push_notification,
+    send_email=send_email,
+    company_email=COMPANY_EMAIL,
     # TEMP-BYPASS pay-first: share app.py's single environment-backed flag.
     bypass_pay_first=BYPASS_PAY_FIRST,
 )
@@ -3467,7 +3469,11 @@ def quotation_page():
     if user and user['status'] != 'approved' and session.get('role') != 'admin':
         return redirect('/pending')
     # TEMP-BYPASS pay-first: expose the switch to the issuance status UI.
-    return render_template('quotation.html', bypass_pay_first=BYPASS_PAY_FIRST)
+    return render_template(
+        'quotation.html',
+        bypass_pay_first=BYPASS_PAY_FIRST,
+        is_admin=session.get('role') == 'admin',
+    )
 
 @app.route('/clients')
 @login_required
@@ -4158,7 +4164,8 @@ def client_360_api(client_id):
                      WHERE p.client_id=%s
                      ORDER BY cl.created_at DESC""", (client_id,))
     payments = query("""SELECT pay.id, pay.policy_no, pay.amount, pay.status,
-                               pay.method, pay.reference, pay.paid_at, pay.created_at
+                               pay.method, pay.reference, pay.paid_at, pay.created_at,
+                               pay.admin_override, pay.override_reason
                         FROM payments pay
                         JOIN policies p ON p.policy_no = pay.policy_no
                         WHERE p.client_id=%s
