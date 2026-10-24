@@ -23,6 +23,9 @@ except ImportError:
     logging.warning("python-dotenv not installed — .env file will not be loaded automatically. "
                     "Run `pip install python-dotenv`, or export the required env vars manually.")
 
+# TEMP-BYPASS pay-first: remove after balance bug is fixed.
+BYPASS_PAY_FIRST = os.getenv("BYPASS_PAY_FIRST", "false").lower() == "true"
+
 from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -1610,9 +1613,9 @@ def dmvic_vehicle_identity(quote_row):
 
 def _issue_dmvic_certificate_impl(policy_no, quote_row):
     """
-    Attempts DMVIC certificate issuance for a paid policy. Called after the
-    payment settlement transition on a background worker so the agent isn't
-    blocked waiting on DMVIC's response.
+    Attempts DMVIC certificate issuance for a paid policy, or an unpaid policy
+    when the temporary pay-first bypass is enabled. Called on a background
+    worker so the agent isn't blocked waiting on DMVIC's response.
 
     Confirmed with the business (2026-07-22): four product categories are
     now issued through DMVIC's Intermediary endpoints —
@@ -1631,11 +1634,8 @@ def _issue_dmvic_certificate_impl(policy_no, quote_row):
     unknown-column error until that migration is applied.
     """
     policy = query("SELECT status FROM policies WHERE policy_no=%s", (policy_no,), fetchone=True)
-    # Pay-before-issuance gate: only fully paid (activated) policies reach
-    # DMVIC. Issuance jobs are enqueued exclusively from
-    # activate_paid_policy_and_enqueue_dmvic(), after the cumulative payments
-    # cover the quoted premium.
-    if not policy or policy.get('status') != 'active':
+    # TEMP-BYPASS pay-first: skip the active-policy gate only while explicitly enabled.
+    if not policy or (not BYPASS_PAY_FIRST and policy.get('status') != 'active'):
         log.warning("DMVIC issuance skipped for unpaid or missing policy %s", policy_no)
         return
 
@@ -2045,7 +2045,28 @@ def issue_dmvic_certificate(policy_no, quote_row):
     quietly does nothing)."""
     started = time.time()
     try:
+        # TEMP-BYPASS pay-first: audit only a transition that actually issued a certificate.
+        before = query("""SELECT agent_id, quote_id, total_payable, dmvic_status
+                          FROM policies WHERE policy_no=%s""",
+                       (policy_no,), fetchone=True) if BYPASS_PAY_FIRST else None
         _issue_dmvic_certificate_impl(policy_no, quote_row)
+        if BYPASS_PAY_FIRST and before and before.get('dmvic_status') != 'issued':
+            after = query("SELECT dmvic_status FROM policies WHERE policy_no=%s",
+                          (policy_no,), fetchone=True) or {}
+            if after.get('dmvic_status') == 'issued':
+                paid_row = query("""SELECT COALESCE(SUM(amount),0) AS paid
+                                    FROM payments
+                                    WHERE policy_no=%s AND status='completed'""",
+                                 (policy_no,), fetchone=True) or {}
+                detail = (
+                    f"policy={policy_no} quote={before.get('quote_id')} "
+                    f"premium={before.get('total_payable')} "
+                    f"amount_paid={paid_row.get('paid', 0)} "
+                    f"timestamp={datetime.now().isoformat(timespec='seconds')}"
+                )
+                query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+                      (before.get('agent_id'), 'dmvic_certificate_issued_pay_first_bypass', detail),
+                      commit=True)
         log.info("DMVIC issuance job for %s completed in %.1fs (dmvic_status=%s)",
                  policy_no, time.time() - started,
                  (query("SELECT dmvic_status FROM policies WHERE policy_no=%s",
@@ -2994,6 +3015,8 @@ init_payments(
     next_monarch_policy_no=next_monarch_policy_no,
     notify_underpayment_attempt=notify_underpayment_attempt,
     push_notification=push_notification,
+    # TEMP-BYPASS pay-first: share app.py's single environment-backed flag.
+    bypass_pay_first=BYPASS_PAY_FIRST,
 )
 
 
@@ -3418,12 +3441,14 @@ def dashboard():
     user = query("SELECT status FROM users WHERE id=%s", (session['user_id'],), fetchone=True)
     if user and user['status'] != 'approved' and session.get('role') != 'admin':
         return redirect('/pending')
-    return render_template('dashboard.html')
+    # TEMP-BYPASS pay-first: expose the switch for the admin warning banner.
+    return render_template('dashboard.html', bypass_pay_first=BYPASS_PAY_FIRST)
 
 @app.route('/quotation')
 @login_required
 def quotation_page():
-    return render_template('quotation.html')
+    # TEMP-BYPASS pay-first: expose the switch to the issuance status UI.
+    return render_template('quotation.html', bypass_pay_first=BYPASS_PAY_FIRST)
 
 @app.route('/clients')
 @login_required
@@ -4322,7 +4347,8 @@ def generate_quotation():
                 return jsonify({"error": "Original policy not found for this extension."}), 404
             if session['role'] != 'admin' and parent.get('agent_id') != session['user_id']:
                 return jsonify({"error": "You do not have access to this policy."}), 403
-            if parent.get('status') != 'active':
+            # TEMP-BYPASS pay-first: allow an installment extension while the temporary bypass is enabled.
+            if not BYPASS_PAY_FIRST and parent.get('status') != 'active':
                 return jsonify({"error": "The prior installment policy must have a confirmed payment before it can be extended."}), 409
             if parent.get('installment_plan') != cert:
                 return jsonify({"error": "Choose the same installment plan as the prior policy."}), 400

@@ -63,14 +63,17 @@ _monarch_policy_class = None
 _next_monarch_policy_no = None
 _notify_underpayment_attempt = None
 _push_notification = None
+_bypass_pay_first = False  # TEMP-BYPASS pay-first: configured once by app.py.
 
 
 def init_payments(app, *, csrf, query, mongo_store, enqueue, issue_dmvic_certificate,
                    cache_delete_prefix, safe_error_response, monarch_policy_class,
-                   next_monarch_policy_no, notify_underpayment_attempt, push_notification):
+                   next_monarch_policy_no, notify_underpayment_attempt, push_notification,
+                   bypass_pay_first):
     global _query, _mongo_store, _enqueue, _issue_dmvic_certificate
     global _cache_delete_prefix, _safe_error_response, _monarch_policy_class
     global _next_monarch_policy_no, _notify_underpayment_attempt, _push_notification
+    global _bypass_pay_first
     _query = query
     _mongo_store = mongo_store
     _enqueue = enqueue
@@ -81,6 +84,8 @@ def init_payments(app, *, csrf, query, mongo_store, enqueue, issue_dmvic_certifi
     _next_monarch_policy_no = next_monarch_policy_no
     _notify_underpayment_attempt = notify_underpayment_attempt
     _push_notification = push_notification
+    # TEMP-BYPASS pay-first: consume the one flag read by app.py.
+    _bypass_pay_first = bypass_pay_first
 
     csrf.exempt(mpesa_callback)
 
@@ -275,6 +280,18 @@ def activate_paid_policy_and_enqueue_dmvic(policy_no, *, source, reference, user
                ("Payment confirmed, but the quotation required for DMVIC issuance is unavailable.", policy_no),
                commit=True)
 
+    # TEMP-BYPASS pay-first: audit the actual activation transition with its current payment position.
+    if _bypass_pay_first:
+        amount_paid = _completed_payment_total(policy_no)
+        detail = (
+            f"policy={policy_no} quote={policy.get('quote_id')} "
+            f"premium={policy.get('total_payable')} amount_paid={amount_paid} "
+            f"timestamp={time.strftime('%Y-%m-%dT%H:%M:%S')}"
+        )
+        _query("INSERT INTO audit_log (user_id, action, detail) VALUES (%s,%s,%s)",
+               (user_id if user_id is not None else policy.get('agent_id'),
+                'policy_issued_pay_first_bypass', detail), commit=True)
+
     if user_id is None:
         _query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
                (source, f"policy={policy_no} ref={reference}"), commit=True)
@@ -315,9 +332,9 @@ def _new_internal_policy_no():
 def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None,
                           verified_amount=None):
     """Mark the M-Pesa payment for `ref` completed, then activate the policy
-    only once it is fully paid.
+    only once it is fully paid unless the temporary pay-first bypass is enabled.
 
-    A single (possibly partial) successful payment must NOT activate a policy.
+    A single (possibly partial) successful payment must not activate a policy by default.
     Partial payments accumulate (each as its own completed `payments` row) and
     the policy is activated only when the quoted premium is covered. Returns
     True if the policy transitioned to active on this call, False otherwise.
@@ -357,7 +374,8 @@ def _settle_mpesa_payment(ref, policy_no, *, source, reference, user_id=None,
     _query("UPDATE payments SET status='completed', paid_at=NOW() WHERE reference=%s",
            (ref,), commit=True)
 
-    if not _policy_fully_paid(policy_no):
+    # TEMP-BYPASS pay-first: skip only the paid-total activation gate when enabled.
+    if not _bypass_pay_first and not _policy_fully_paid(policy_no):
         log.info("Payment %s settled but policy %s is not fully paid; not activating.",
                  ref, policy_no)
         _query("INSERT INTO audit_log (action, detail) VALUES (%s,%s)",
@@ -461,14 +479,17 @@ def buy_cover():
     _cache_delete_prefix("cache:dashboard")
     _cache_delete_prefix("cache:reports_summary")
 
-    BYPASS_PAYMENT_GATE_ON = False
-    bypass = BYPASS_PAYMENT_GATE_ON and session.get('role') == 'admin'
+    # TEMP-BYPASS pay-first: activate at policy creation only when explicitly enabled.
+    bypass = _bypass_pay_first
     if bypass:
         log.warning("BYPASS_PAYMENT_GATE active: activating %s without payment", policy_no)
-        activate_paid_policy_and_enqueue_dmvic(
+        activated = activate_paid_policy_and_enqueue_dmvic(
             policy_no, source='payment_gate_bypass',
             reference='bypass', user_id=session.get('user_id'),
         )
+        if not activated:
+            log.error("Pay-first bypass could not activate newly created policy %s", policy_no)
+            return jsonify({"error": "Policy was created but could not be activated for issuance."}), 500
 
     return jsonify({
         "success":        True,

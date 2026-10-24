@@ -63,6 +63,13 @@
         </div>
     </div>
 
+    {% if session.get('role') == 'admin' and bypass_pay_first %}
+    <!-- TEMP-BYPASS pay-first: visible admin warning while the flag is enabled. -->
+    <div role="alert" style="margin:12px 0;padding:12px 16px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb;color:#92400e;font-weight:700;">
+        Pay-first rule is temporarily disabled
+    </div>
+    {% endif %}
+
     <!-- ── Mobile quick-jump nav — lets admins skip straight to a section
          instead of scrolling past everything on a phone screen. Hidden on
          desktop (see dashboard.css); populated per-role in JS below. ── -->

@@ -512,6 +512,8 @@
 </div>
 
 <script>
+// TEMP-BYPASS pay-first: use the server-provided issuance-only switch.
+const BYPASS_PAY_FIRST = {{ bypass_pay_first | tojson }};
 let currentStep = 1;
 
 // CSRF token, read once from the meta tag rendered by Flask-WTF.
@@ -1623,7 +1625,13 @@ async function buyCover(quoteId) {
                 <p style="font-family:monospace; font-size:15px; margin:0 0 12px;">${esc(r.policy_no)}</p>
 
                 <div id="dmvicStatusBox" class="dmvic-status-box pending">
-                    <i class="fas fa-clock"></i> Awaiting confirmed payment. DMVIC certificate issuance starts automatically after payment.
+                    <i class="fas fa-clock"></i>
+                    {% if bypass_pay_first %}
+                    <!-- TEMP-BYPASS pay-first: initial post-purchase state must not imply payment is required. -->
+                    Pay-first rule is temporarily disabled. DMVIC certificate issuance starts automatically.
+                    {% else %}
+                    Awaiting confirmed payment. DMVIC certificate issuance starts automatically after payment.
+                    {% endif %}
                 </div>
 
                 <p style="font-size:13px; color:#475569; margin:14px 0 10px;">Pay the premium via M-Pesa:</p>
@@ -1672,7 +1680,13 @@ function pollDmvicStatus(policyNo) {
         // cumulative payments cover the quoted premium, and nothing is issued
         // before that. Surface the shortfall when a part payment has settled —
         // the M-Pesa button below always charges the outstanding balance.
+        // TEMP-BYPASS pay-first: do not surface the payment gate while bypassed.
         if (statusData.policy_status === 'pending_payment') {
+            if (BYPASS_PAY_FIRST) {
+                box.className = 'dmvic-status-box pending';
+                box.innerHTML = `<i class="fas fa-clock"></i> Pay-first rule is temporarily disabled. Policy and DMVIC issuance are processing.`;
+                return false;
+            }
             const paid = Number(statusData.amount_paid || 0);
             const bal  = Number(statusData.balance || 0);
             box.className = 'dmvic-status-box pending';
@@ -1905,7 +1919,8 @@ async function initiateMpesa(policyNo) {
                         }
                     } catch { /* fall back to the full-payment message */ }
 
-                    if (fullyPaid) {
+                    // TEMP-BYPASS pay-first: do not let stale payment totals block the post-payment success state.
+                    if (BYPASS_PAY_FIRST || fullyPaid) {
                         msgEl.style.color = '#15803d';
                         msgEl.innerHTML   = `<strong><i class="fas fa-check-circle"></i> Payment Confirmed!</strong><br>
                             <span style="font-size:12px; color:#64748b;">Policy is now active. Preparing the DMVIC certificate…</span>`;
