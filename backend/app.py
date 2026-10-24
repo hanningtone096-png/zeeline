@@ -23,8 +23,7 @@ except ImportError:
     logging.warning("python-dotenv not installed — .env file will not be loaded automatically. "
                     "Run `pip install python-dotenv`, or export the required env vars manually.")
 
-# TEMP-BYPASS pay-first: remove after balance bug is fixed.
-BYPASS_PAY_FIRST = os.getenv("BYPASS_PAY_FIRST", "false").strip().lower() in {"true", "1", "yes"}
+BYPASS_PAY_FIRST = True   # TEMP-BYPASS pay-first: set to False and push to restore the payment requirement
 
 from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
